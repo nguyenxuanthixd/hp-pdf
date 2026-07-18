@@ -50,7 +50,7 @@ Name: "setdefault"; Description: "{cm:SetDefault}"; GroupDescription: "Lien ket 
 
 [Files]
 Source: "dist\HPConsPDF\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "HUONG-DAN.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "logo.png"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -73,7 +73,7 @@ Root: HKA; Subkey: "Software\Classes\.pdf"; ValueType: string; ValueData: "HPCon
 
 [Icons]
 Name: "{group}\HP Cons PDF"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\logo.ico"
-Name: "{group}\Huong dan (README)"; Filename: "{app}\README.md"
+Name: "{group}\Huong dan"; Filename: "{app}\HUONG-DAN.md"
 Name: "{group}\Go cai dat HP Cons PDF"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\HP Cons PDF"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\logo.ico"; Tasks: desktopicon
 
