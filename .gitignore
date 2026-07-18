@@ -1,0 +1,34 @@
+# PyInstaller / build
+build/
+dist/
+Output/
+*.spec
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# File tam / ket qua chinh sua PDF
+*.part
+~*.dang-luu
+*.log
+
+# IDE / he thong
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# Cau hinh Claude Code cuc bo
+.claude/
+
+# File nhay cam / khong dua len GitHub public
+# - Bao gia, tai lieu PDF that cua cong ty
+*.pdf
+# - Logo HP Cons cu va anh nguon (giu logo.png / logo.ico lam icon app)
+logo.jpg
+new logo.jpg
+*.jpeg

@@ -1,0 +1,9 @@
+PyQt6>=6.6
+pypdfium2>=4.30
+pikepdf>=8.0
+pypdf>=4.0
+pytesseract>=0.3.10
+Pillow>=10.0
+reportlab>=4.0
+# Chi can khi dong goi:
+pyinstaller>=6.0

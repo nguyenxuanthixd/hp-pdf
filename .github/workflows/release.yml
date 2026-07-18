@@ -1,0 +1,50 @@
+name: Build & Release
+
+# Chay khi day tag dang v* (vd v1.0.2) -> tu build installer + dang Release
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # can de tao/ghi Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cai thu vien
+        run: pip install -r requirements.txt
+
+      - name: Dong bo version theo tag
+        run: python tools/bump_version.py "${{ github.ref_name }}"
+
+      - name: Build app (PyInstaller onedir)
+        run: >
+          pyinstaller --noconfirm --clean --onedir --windowed
+          --name "HPConsPDF" --icon logo.ico
+          --add-data "logo.png;." --add-data "logo.ico;."
+          --collect-all pypdfium2 --collect-all pypdfium2_raw
+          --hidden-import PyQt6.QtPrintSupport --hidden-import PyQt6.QtNetwork
+          main.py
+
+      - name: Cai Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build file cai dat
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
+
+      - name: Dang Release + dinh kem installer
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "HP Cons PDF ${{ github.ref_name }}"
+          generate_release_notes: true
+          files: Output/HPConsPDF_Setup_*.exe
