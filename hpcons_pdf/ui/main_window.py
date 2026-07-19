@@ -814,7 +814,9 @@ class MainWindow(QMainWindow):
             dm = winprint.set_devmode_fields(
                 dm,
                 orientation=None if orient == "auto" else orient,
-                color=False if dlg.grayscale() else None)
+                color=dlg.color_mode(),
+                paper=dlg.paper(),
+                duplex=dlg.duplex())
         except Exception:
             pass
         tab.print_printer = name

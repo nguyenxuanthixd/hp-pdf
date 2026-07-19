@@ -23,8 +23,19 @@ IDOK = 1
 
 # dmFields bit
 DM_ORIENTATION = 0x00000001
+DM_PAPERSIZE = 0x00000002
 DM_COPIES = 0x00000100
 DM_COLOR = 0x00000800
+DM_DUPLEX = 0x00001000
+
+# dmPaperSize (DMPAPER_*)
+PAPER_SIZES = {
+    "A4": 9, "A3": 8, "A5": 11, "Letter": 1, "Legal": 5, "Tabloid (11x17)": 3,
+}
+# dmDuplex
+DMDUP_SIMPLEX = 1     # 1 mat
+DMDUP_VERTICAL = 2    # 2 mat, lat canh dai (nhu quyen sach)
+DMDUP_HORIZONTAL = 3  # 2 mat, lat canh ngan (nhu bloc)
 
 # GetDeviceCaps
 HORZRES = 8
@@ -287,9 +298,11 @@ def gdi_print(name: str, devmode_bytes: bytes | None, page_indices: list[int],
 
 
 def set_devmode_fields(devmode_bytes: bytes | None, copies=None,
-                       orientation=None, color=None) -> bytes | None:
-    """Ghi de mot so thiet lap vao DEVMODE (so ban / huong / mau).
-    orientation: 'portrait'|'landscape'; color: True(mau)/False(den trang)."""
+                       orientation=None, color=None, paper=None,
+                       duplex=None) -> bytes | None:
+    """Ghi de mot so thiet lap vao DEVMODE.
+    orientation: 'portrait'|'landscape'; color: True(mau)/False(den trang);
+    paper: ten kho giay trong PAPER_SIZES (vd 'A4'); duplex: 1|2|3 (DMDUP_*)."""
     if not devmode_bytes or len(devmode_bytes) < ctypes.sizeof(DEVMODEW):
         return devmode_bytes
     buf = ctypes.create_string_buffer(devmode_bytes, len(devmode_bytes))
@@ -303,6 +316,12 @@ def set_devmode_fields(devmode_bytes: bytes | None, copies=None,
     if color is not None:
         dm.dmColor = 2 if color else 1
         dm.dmFields |= DM_COLOR
+    if paper and paper in PAPER_SIZES:
+        dm.dmPaperSize = PAPER_SIZES[paper]
+        dm.dmFields |= DM_PAPERSIZE
+    if duplex in (DMDUP_SIMPLEX, DMDUP_VERTICAL, DMDUP_HORIZONTAL):
+        dm.dmDuplex = int(duplex)
+        dm.dmFields |= DM_DUPLEX
     return bytes(buf)
 
 

@@ -64,28 +64,39 @@ def run():
             d.page_indices(); assert False
         except ValueError:
             pass
-        # tuy chon moi: so ban / den trang / huong / ti le
-        assert d.copies() == 1 and d.grayscale() is False
-        assert d.orientation() == "auto" and d.scale_mode() == "fit"
+        # tuy chon moi: so ban / mau in / huong / ti le / kho giay / mat
+        assert d.copies() == 1 and d.color_mode() is None  # mau: theo may in
+        # MAC DINH: in ngang (landscape)
+        assert d.orientation() == "landscape" and d.scale_mode() == "fit"
+        assert d.paper() is None and d.duplex() is None  # theo may in
         d.sp_copies.setValue(3)
-        d.chk_gray.setChecked(True)
-        d.rb_land.setChecked(True)
+        d.cb_color.setCurrentIndex(2)  # in den trang (xam)
+        d.rb_port.setChecked(True)
         d.rb_custom.setChecked(True)
         d.sp_pct.setValue(80.0)
-        assert d.copies() == 3 and d.grayscale() is True
-        assert d.orientation() == "landscape"
+        d.cb_paper.setCurrentText("A4")
+        d.cb_duplex.setCurrentIndex(2)  # 2 mat lat canh dai
+        assert d.copies() == 3 and d.color_mode() is False
+        d.cb_color.setCurrentIndex(1)  # in mau
+        assert d.color_mode() is True
+        assert d.orientation() == "portrait"
         assert d.scale_mode() == "custom" and d.custom_percent() == 80.0
+        assert d.paper() == "A4" and d.duplex() == winprint.DMDUP_VERTICAL
 
         # ---- 3b. set_devmode_fields ghi dung DEVMODE ----
         dm2 = winprint.DEVMODEW()
-        raw2 = winprint.set_devmode_fields(bytes(dm2), copies=4,
-                                           orientation="landscape", color=False)
+        raw2 = winprint.set_devmode_fields(
+            bytes(dm2), copies=4, orientation="landscape", color=False,
+            paper="A4", duplex=winprint.DMDUP_VERTICAL)
         chk = ctypes.cast(ctypes.create_string_buffer(raw2, len(raw2)),
                           winprint.PDEVMODE).contents
         assert chk.dmCopies == 4 and chk.dmOrientation == 2 and chk.dmColor == 1
+        assert chk.dmPaperSize == 9 and chk.dmDuplex == 2
         assert chk.dmFields & winprint.DM_COPIES
         assert chk.dmFields & winprint.DM_ORIENTATION
         assert chk.dmFields & winprint.DM_COLOR
+        assert chk.dmFields & winprint.DM_PAPERSIZE
+        assert chk.dmFields & winprint.DM_DUPLEX
 
         # ---- 4. Ghi nho thiet lap per-tab, reset khi dong file ----
         win.open_path(DDK)

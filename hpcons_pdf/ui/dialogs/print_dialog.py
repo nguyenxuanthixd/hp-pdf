@@ -53,10 +53,34 @@ class PrintDialog(QDialog):
         self.sp_copies.setRange(1, 999)
         self.sp_copies.setValue(1)
         row2.addWidget(self.sp_copies)
-        row2.addStretch(1)
-        self.chk_gray = QCheckBox("In đen trắng (xám)")
-        row2.addWidget(self.chk_gray)
+        row2.addSpacing(12)
+        row2.addWidget(QLabel("Màu in:"))
+        self.cb_color = QComboBox()
+        self.cb_color.addItem("Theo máy in", None)
+        self.cb_color.addItem("In màu", True)
+        self.cb_color.addItem("In đen trắng (xám)", False)
+        row2.addWidget(self.cb_color, 1)
         v.addLayout(row2)
+
+        # Chon nhanh kho giay + cach in mat (con lai chinh trong Thuoc tinh)
+        from ...core import winprint
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("Khổ giấy:"))
+        self.cb_paper = QComboBox()
+        self.cb_paper.addItem("Theo máy in", None)
+        for pname in winprint.PAPER_SIZES:
+            self.cb_paper.addItem(pname, pname)
+        row3.addWidget(self.cb_paper, 1)
+        v.addLayout(row3)
+        row4 = QHBoxLayout()
+        row4.addWidget(QLabel("Cách in mặt:"))
+        self.cb_duplex = QComboBox()
+        self.cb_duplex.addItem("Theo máy in", None)
+        self.cb_duplex.addItem("1 mặt", winprint.DMDUP_SIMPLEX)
+        self.cb_duplex.addItem("2 mặt (lật cạnh dài)", winprint.DMDUP_VERTICAL)
+        self.cb_duplex.addItem("2 mặt (lật cạnh ngắn)", winprint.DMDUP_HORIZONTAL)
+        row4.addWidget(self.cb_duplex, 1)
+        v.addLayout(row4)
         left.addWidget(gp_pr)
 
         # -- Pham vi in --
@@ -118,7 +142,7 @@ class PrintDialog(QDialog):
         for rb in (self.rb_auto, self.rb_port, self.rb_land):
             gor.addButton(rb)
             vo.addWidget(rb)
-        self.rb_auto.setChecked(True)
+        self.rb_land.setChecked(True)  # mac dinh IN NGANG (theo yeu cau Sep)
         left.addWidget(gp_or)
 
         left.addStretch(1)
@@ -248,8 +272,15 @@ class PrintDialog(QDialog):
     def copies(self) -> int:
         return self.sp_copies.value()
 
-    def grayscale(self) -> bool:
-        return self.chk_gray.isChecked()
+    def color_mode(self):
+        """None = theo may in; True = in mau; False = in den trang (xam)."""
+        return self.cb_color.currentData()
+
+    def paper(self):
+        return self.cb_paper.currentData()
+
+    def duplex(self):
+        return self.cb_duplex.currentData()
 
     def orientation(self) -> str:
         if self.rb_port.isChecked():
