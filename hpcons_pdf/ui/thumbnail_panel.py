@@ -34,6 +34,13 @@ class ThumbnailPanel(QListWidget):
         self._rt.rendered.connect(self._on_rendered)
         self.model_doc = None
         self.generation = 0
+        # Lazy render: chi render thumbnail cua TAB DANG XEM. Tab an khong
+        # render (tranh tranh khoa pdfium lam trang dang xem giat). Nho cac
+        # trang da render de khi quay lai tab khong render lai tu dau.
+        # Mac dinh CHUA active -> MainWindow._on_tab_changed kich hoat tab
+        # dang xem; tab tao ra nhung chua duoc xem se khong render.
+        self._active = False
+        self._rendered_idx: set[int] = set()
         self._press_row = -1
         self._press_pos = None
         self._manual_drag = False
@@ -74,9 +81,22 @@ class ThumbnailPanel(QListWidget):
         self.model_doc = model_doc
         self.reload()
 
+    def set_active(self, active: bool):
+        """Danh dau tab dang xem hay bi an. Active -> render nhung thumbnail
+        con thieu; an -> huy yeu cau dang cho de nhuong khoa pdfium cho tab
+        dang xem (thumbnail da render van giu nguyen)."""
+        self._active = active
+        if self.model_doc is None:
+            return
+        if active:
+            self._request_missing()
+        else:
+            self._rt.clear_pending("thumb", self.model_doc)
+
     def reload(self):
         self.generation += 1
         self._rt.clear_pending("thumb", self.model_doc)
+        self._rendered_idx.clear()
         self.blockSignals(True)
         self.clear()
         self.blockSignals(False)
@@ -89,7 +109,19 @@ class ThumbnailPanel(QListWidget):
                                 | Qt.AlignmentFlag.AlignBottom)
             it.setSizeHint(self._cell_size(i))
             self.addItem(it)
-        self._request_all()
+        if self._active:
+            self._request_all()
+
+    def _request_missing(self):
+        """Render nhung trang chua co thumbnail (khi kich hoat lai tab)."""
+        if self.model_doc is None:
+            return
+        for i in range(self.model_doc.page_count):
+            if i in self._rendered_idx:
+                continue
+            w_pt, h_pt = self.model_doc.page_size(i)
+            scale = min(THUMB_W / max(w_pt, 1), THUMB_H / max(h_pt, 1))
+            self._rt.request(self.model_doc, i, scale, "thumb", self.generation)
 
     def _cell_size(self, i: int) -> QSize:
         """Kich thuoc o = anh thu nho theo ty le trang + cho nhan so."""
@@ -101,6 +133,9 @@ class ThumbnailPanel(QListWidget):
         """Render lai thumbnail 1 trang (sau khi noi dung thay doi)."""
         if self.model_doc is None or i >= self.model_doc.page_count:
             return
+        self._rendered_idx.discard(i)  # buoc render lai
+        if not self._active:
+            return  # tab an -> de dan khi kich hoat lai
         w_pt, h_pt = self.model_doc.page_size(i)
         scale = min(THUMB_W / max(w_pt, 1), THUMB_H / max(h_pt, 1))
         self._rt.request(self.model_doc, i, scale, "thumb", self.generation)
@@ -134,6 +169,7 @@ class ThumbnailPanel(QListWidget):
             it = self.item(row)
             if it.data(_ROLE_POS) == index:
                 it.setIcon(QIcon(pm))
+                self._rendered_idx.add(index)
                 break
 
     # ---------- Keo tha ----------
@@ -347,7 +383,8 @@ class ThumbnailPanel(QListWidget):
         # Huy render dang cho (mang chi so cu) va render lai theo thu tu moi
         self.generation += 1
         self._rt.clear_pending("thumb", self.model_doc)
-        if self.model_doc is not None:
+        self._rendered_idx.clear()
+        if self.model_doc is not None and self._active:
             self._request_all()
 
     def selected_pages(self) -> list[int]:

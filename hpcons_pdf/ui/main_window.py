@@ -746,6 +746,12 @@ class MainWindow(QMainWindow):
             tab.view.set_tool(checked.data() if checked else "pan")
             tab.view.annot_color = self.annot_color
             tab.thumbs.setVisible(self.sidebar_visible)
+        # Lazy render: chi tab DANG XEM render thumbnail; tab an huy yeu cau
+        # dang cho de khong tranh khoa pdfium lam trang dang xem giat.
+        for i in range(self.tabs.count()):
+            w = self.tabs.widget(i)
+            if isinstance(w, DocumentTab):
+                w.thumbs.set_active(w is tab)
         self._update_ui_state()
         self.lb_search.setText("")
 
