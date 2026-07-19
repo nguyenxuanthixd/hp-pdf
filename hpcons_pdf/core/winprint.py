@@ -21,6 +21,11 @@ DM_IN_PROMPT = 4
 DM_IN_BUFFER = 8
 IDOK = 1
 
+# dmFields bit
+DM_ORIENTATION = 0x00000001
+DM_COPIES = 0x00000100
+DM_COLOR = 0x00000800
+
 # GetDeviceCaps
 HORZRES = 8
 VERTRES = 10
@@ -186,9 +191,11 @@ def prompt_devmode(name: str, hwnd: int = 0, devmode_in: bytes | None = None):
 
 def gdi_print(name: str, devmode_bytes: bytes | None, page_indices: list[int],
               get_bgr, doc_name: str = "HP Cons PDF",
-              progress=None, cancel=None, output_file: str | None = None):
-    """In qua GDI. get_bgr(i, max_w_px, max_h_px) -> (w, h, bytes_bgr_topdown)
-    hoac None de bo qua trang. Tra ve so trang da in, hoac UNAVAILABLE."""
+              progress=None, cancel=None, output_file: str | None = None,
+              scale_mode: str = "fit", custom_percent: float = 100.0):
+    """In qua GDI. get_bgr(i, max_w_px, max_h_px) -> (w, h, bytes_bgr_topdown,
+    render_dpi) hoac None de bo qua trang. Tra ve so trang da in / UNAVAILABLE.
+    scale_mode: 'fit' (vua le giay) | 'actual' (co that 100%) | 'custom' (%)."""
     gdi = ctypes.windll.gdi32
     gdi.CreateDCW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR,
                               wintypes.LPCWSTR, PDEVMODE]
@@ -226,6 +233,9 @@ def gdi_print(name: str, devmode_bytes: bytes | None, page_indices: list[int],
         di.lpszOutput = output_file  # None = ra may in; duong dan = ghi file
         if gdi.StartDocW(hdc, ctypes.byref(di)) <= 0:
             return UNAVAILABLE
+        # DPI vat ly cua may in (cham/inch) de tinh "co that" / "tuy chinh %"
+        dev_dpi_x = gdi.GetDeviceCaps(hdc, LOGPIXELSX) or 300
+        dev_dpi_y = gdi.GetDeviceCaps(hdc, LOGPIXELSY) or 300
         done = 0
         aborted = False
         total = len(page_indices)
@@ -239,11 +249,22 @@ def gdi_print(name: str, devmode_bytes: bytes | None, page_indices: list[int],
             res = get_bgr(i, hres, vres)
             if res is None:
                 continue
-            w, h, data = res
+            if len(res) == 4:
+                w, h, data, render_dpi = res
+            else:
+                w, h, data = res
+                render_dpi = 0
             if gdi.StartPage(hdc) <= 0:
                 continue
-            ratio = min(hres / w, vres / h)
-            dw, dh = int(w * ratio), int(h * ratio)
+            if scale_mode in ("actual", "custom") and render_dpi:
+                # Kich thuoc that: so pixel anh / dpi render = so inch cua trang
+                pct = (custom_percent / 100.0) if scale_mode == "custom" else 1.0
+                dw = int(w * dev_dpi_x / render_dpi * pct)
+                dh = int(h * dev_dpi_y / render_dpi * pct)
+            else:
+                # Vua le giay (giu ti le)
+                ratio = min(hres / w, vres / h)
+                dw, dh = int(w * ratio), int(h * ratio)
             dx, dy = (hres - dw) // 2, (vres - dh) // 2
             bmi = BITMAPINFOHEADER()
             bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
@@ -263,6 +284,26 @@ def gdi_print(name: str, devmode_bytes: bytes | None, page_indices: list[int],
         return done
     finally:
         gdi.DeleteDC(hdc)
+
+
+def set_devmode_fields(devmode_bytes: bytes | None, copies=None,
+                       orientation=None, color=None) -> bytes | None:
+    """Ghi de mot so thiet lap vao DEVMODE (so ban / huong / mau).
+    orientation: 'portrait'|'landscape'; color: True(mau)/False(den trang)."""
+    if not devmode_bytes or len(devmode_bytes) < ctypes.sizeof(DEVMODEW):
+        return devmode_bytes
+    buf = ctypes.create_string_buffer(devmode_bytes, len(devmode_bytes))
+    dm = ctypes.cast(buf, PDEVMODE).contents
+    if copies is not None and copies >= 1:
+        dm.dmCopies = int(copies)
+        dm.dmFields |= DM_COPIES
+    if orientation in ("portrait", "landscape"):
+        dm.dmOrientation = 1 if orientation == "portrait" else 2
+        dm.dmFields |= DM_ORIENTATION
+    if color is not None:
+        dm.dmColor = 2 if color else 1
+        dm.dmFields |= DM_COLOR
+    return bytes(buf)
 
 
 def read_copies(devmode_bytes: bytes | None) -> int:

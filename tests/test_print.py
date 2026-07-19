@@ -46,10 +46,12 @@ def run():
             assert b is None or (isinstance(b, bytes)
                                  and len(b) >= ctypes.sizeof(winprint.DEVMODEW))
 
-        # ---- 3. Hop thoai chon may in + pham vi ----
+        # ---- 3. Hop thoai chon may in + pham vi + tuy chon in ----
+        from PyQt6.QtGui import QPixmap
         from hpcons_pdf.ui.dialogs.print_dialog import PrintDialog
         pn = names or ["Máy in ảo A", "Máy in ảo B"]
-        d = PrintDialog(59, 4, pn, pn[0], pn[-1], win)
+        d = PrintDialog(59, 4, pn, pn[0], pn[-1], int(win.winId()),
+                        lambda i, mx: QPixmap(), win)
         assert d.selected_printer() == pn[-1]         # nho may in lan cuoi
         assert d.page_indices() == list(range(59))    # tat ca
         d.rb_cur.setChecked(True)
@@ -62,6 +64,28 @@ def run():
             d.page_indices(); assert False
         except ValueError:
             pass
+        # tuy chon moi: so ban / den trang / huong / ti le
+        assert d.copies() == 1 and d.grayscale() is False
+        assert d.orientation() == "auto" and d.scale_mode() == "fit"
+        d.sp_copies.setValue(3)
+        d.chk_gray.setChecked(True)
+        d.rb_land.setChecked(True)
+        d.rb_custom.setChecked(True)
+        d.sp_pct.setValue(80.0)
+        assert d.copies() == 3 and d.grayscale() is True
+        assert d.orientation() == "landscape"
+        assert d.scale_mode() == "custom" and d.custom_percent() == 80.0
+
+        # ---- 3b. set_devmode_fields ghi dung DEVMODE ----
+        dm2 = winprint.DEVMODEW()
+        raw2 = winprint.set_devmode_fields(bytes(dm2), copies=4,
+                                           orientation="landscape", color=False)
+        chk = ctypes.cast(ctypes.create_string_buffer(raw2, len(raw2)),
+                          winprint.PDEVMODE).contents
+        assert chk.dmCopies == 4 and chk.dmOrientation == 2 and chk.dmColor == 1
+        assert chk.dmFields & winprint.DM_COPIES
+        assert chk.dmFields & winprint.DM_ORIENTATION
+        assert chk.dmFields & winprint.DM_COLOR
 
         # ---- 4. Ghi nho thiet lap per-tab, reset khi dong file ----
         win.open_path(DDK)

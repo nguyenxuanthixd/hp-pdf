@@ -609,6 +609,9 @@ class MainWindow(QMainWindow):
             if self.tabs.widget(i) is getattr(self, "empty", None):
                 self.tabs.removeTab(i)
                 break
+        # Mo tai lieu -> bung het man hinh (theo yeu cau Sep)
+        if not self.isMaximized() and not self.isFullScreen():
+            self.showMaximized()
         self._update_ui_state()
 
     def _take_tab(self, index: int) -> DocumentTab | None:
@@ -790,32 +793,69 @@ class MainWindow(QMainWindow):
             not default_info.isNull() else names[0]
         last = tab.print_printer or config.get("last_printer", "")
 
+        def get_preview(page_index, max_px):
+            return self._render_preview_pixmap(tab, page_index, max_px)
+
         dlg = PrintDialog(tab.model.page_count, tab.view.current_page,
-                          names, default_name, last, self)
+                          names, default_name, last, int(self.winId()),
+                          get_preview, self)
         if not dlg.exec():
             return
         name = dlg.selected_printer()
         config.set("last_printer", name)
         pages = dlg.page_indices()
 
-        # Ghi nho: neu van in cung may in trong phien -> mo hop thoai voi
-        # thiet lap lan truoc; khac may thi bat dau tu mac dinh may do.
-        dm_in = tab.print_devmode if tab.print_printer == name else None
+        # Ap thiet lap tu hop thoai vao DEVMODE (huong giay, den trang).
+        # So ban xu ly bang cach nhan doi danh sach trang (collated) cho
+        # chac an voi moi driver -> khong dung dmCopies de tranh in gap doi.
+        dm = dlg.devmode_bytes()
+        orient = dlg.orientation()
         try:
-            dm = winprint.prompt_devmode(name, int(self.winId()), dm_in)
+            dm = winprint.set_devmode_fields(
+                dm,
+                orientation=None if orient == "auto" else orient,
+                color=False if dlg.grayscale() else None)
         except Exception:
-            dm = winprint.UNAVAILABLE
-        if dm is winprint.CANCELLED:
-            return
-        if dm is winprint.UNAVAILABLE:
-            # Khong dung duoc driver native -> quay ve hop thoai Qt
-            self._print_with_dialog()
-            return
+            pass
         tab.print_printer = name
         tab.print_devmode = dm  # nho cho lan in sau (trong phien)
-        self._gdi_print(tab, name, dm, pages)
+        copies = dlg.copies()
+        if copies > 1:
+            pages = pages * copies
+        self._gdi_print(tab, name, dm, pages,
+                        scale_mode=dlg.scale_mode(),
+                        custom_percent=dlg.custom_percent())
 
-    def _gdi_print(self, tab, name, devmode, pages):
+    def _render_preview_pixmap(self, tab, page_index, max_px):
+        """Anh xem truoc cho hop thoai in (render nho, kem ghi chu)."""
+        from PyQt6.QtGui import QPainter, QPixmap
+
+        from .pdf_view import _draw_annot
+        from .render_thread import pil_to_qimage
+
+        model = tab.model
+        # uoc luong ti le de canh dai nhat ~ max_px
+        pw, ph = 595, 842
+        try:
+            sz = model.page_size(page_index)
+            if sz:
+                pw, ph = sz
+        except Exception:
+            pass
+        scale = max(0.2, min(2.0, max_px / max(pw, ph)))
+        pil = model.render_page(page_index, scale)
+        img = pil_to_qimage(pil)
+        ref = model.pages[page_index]
+        if ref.annots:
+            ap = QPainter(img)
+            ap.setRenderHint(QPainter.RenderHint.Antialiasing)
+            for an in ref.annots:
+                _draw_annot(ap, an, scale, False)
+            ap.end()
+        return QPixmap.fromImage(img)
+
+    def _gdi_print(self, tab, name, devmode, pages,
+                   scale_mode="fit", custom_percent=100.0):
         from PyQt6.QtCore import QRectF
         from PyQt6.QtGui import QImage, QPainter, QTransform
         from PyQt6.QtWidgets import QApplication, QProgressDialog
@@ -853,7 +893,7 @@ class MainWindow(QMainWindow):
             img = img.convertToFormat(QImage.Format.Format_BGR888)
             w, h = img.width(), img.height()
             data = bytes(img.constBits().asstring(img.sizeInBytes()))
-            return (w, h, data)
+            return (w, h, data, dpi)
 
         def prog(k, total, msg):
             progress.setValue(k)
@@ -864,7 +904,9 @@ class MainWindow(QMainWindow):
 
         result = winprint.gdi_print(name, devmode, pages, get_bgr,
                                     doc_name=model.display_name,
-                                    progress=prog, cancel=cancel)
+                                    progress=prog, cancel=cancel,
+                                    scale_mode=scale_mode,
+                                    custom_percent=custom_percent)
         progress.setValue(len(pages))
         if result is winprint.UNAVAILABLE:
             self._print_with_dialog()
