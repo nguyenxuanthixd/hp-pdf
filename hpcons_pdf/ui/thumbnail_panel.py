@@ -352,8 +352,14 @@ class ThumbnailPanel(QListWidget):
         return sorted(self.row(it) for it in self.selectedItems())
 
     # ---------- Ban phim ----------
+    _NAV_KEYS = (Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Left,
+                 Qt.Key.Key_Right, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown,
+                 Qt.Key.Key_Home, Qt.Key.Key_End)
+
     def keyPressEvent(self, event):
-        ctrl = event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        mods = event.modifiers()
+        ctrl = mods & Qt.KeyboardModifier.ControlModifier
+        shift = mods & Qt.KeyboardModifier.ShiftModifier
         if event.key() == Qt.Key.Key_Delete and self.selected_pages():
             self.deleteRequested.emit(self.selected_pages())
             return
@@ -364,6 +370,14 @@ class ThumbnailPanel(QListWidget):
             sel = self.selected_pages()
             at = (sel[-1] + 1) if sel else self.count()
             self.pasteRequested.emit(at)
+            return
+        # Bam phim mui ten / PageUp-Down... trong thanh trang -> nhay trang o
+        # khung xem chinh theo. Bo qua khi giu Ctrl/Shift (dang chon nhieu trang).
+        if event.key() in self._NAV_KEYS and not ctrl and not shift:
+            super().keyPressEvent(event)
+            row = self.currentRow()
+            if 0 <= row < self.count():
+                self.pageActivated.emit(row)
             return
         super().keyPressEvent(event)
 
