@@ -76,7 +76,7 @@ class ThumbnailPanel(QListWidget):
 
     def reload(self):
         self.generation += 1
-        self._rt.clear_pending("thumb")
+        self._rt.clear_pending("thumb", self.model_doc)
         self.blockSignals(True)
         self.clear()
         self.blockSignals(False)
@@ -123,8 +123,10 @@ class ThumbnailPanel(QListWidget):
         p.end()
         return QIcon(pm)
 
-    def _on_rendered(self, purpose: str, index: int, gen: int, img: QImage):
-        if purpose != "thumb" or gen != self.generation:
+    def _on_rendered(self, purpose: str, index: int, gen: int, img: QImage,
+                     model=None):
+        if purpose != "thumb" or gen != self.generation \
+                or model is not self.model_doc:
             return
         pm = QPixmap.fromImage(img)
         # item co the da doi vi tri -> tim theo _ROLE_POS
@@ -344,7 +346,7 @@ class ThumbnailPanel(QListWidget):
             self.item(r).setSizeHint(self._cell_size(r))
         # Huy render dang cho (mang chi so cu) va render lai theo thu tu moi
         self.generation += 1
-        self._rt.clear_pending("thumb")
+        self._rt.clear_pending("thumb", self.model_doc)
         if self.model_doc is not None:
             self._request_all()
 

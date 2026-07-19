@@ -21,8 +21,12 @@ def pil_to_qimage(pil) -> QImage:
 
 
 class RenderThread(QThread):
-    """Signal: rendered(purpose, page_index, generation, QImage)."""
-    rendered = pyqtSignal(str, int, int, QImage)
+    """Signal: rendered(purpose, page_index, generation, QImage, model).
+
+    `model` kem theo de MOI khung xem/thumbnail chi nhan anh cua DUNG file
+    minh dang mo (nhieu tab dung chung 1 luong render -> tranh nhan nham anh
+    cua tab khac khi trung so trang + generation)."""
+    rendered = pyqtSignal(str, int, int, QImage, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,14 +41,22 @@ class RenderThread(QThread):
         q.put((model, page_index, scale, purpose, generation))
         self._wake.set()
 
-    def clear_pending(self, purpose: str | None = None):
+    def clear_pending(self, purpose: str | None = None, model=None):
+        """Huy cac yeu cau dang cho. Neu truyen `model` thi CHI huy yeu cau
+        cua model do, GIU nguyen yeu cau cua cac file/tab khac (hang doi dung
+        chung cho moi tab -> khong duoc xoa nham cua tab khac)."""
         for q in ((self._high, self._low) if purpose is None
                   else ((self._high,) if purpose == "page" else (self._low,))):
+            kept = []
             try:
                 while True:
-                    q.get_nowait()
+                    task = q.get_nowait()
+                    if model is not None and task[0] is not model:
+                        kept.append(task)  # cua tab khac -> giu lai
             except queue.Empty:
                 pass
+            for t in kept:
+                q.put(t)
 
     def stop(self):
         self._stop.set()
@@ -72,4 +84,4 @@ class RenderThread(QThread):
             except Exception:
                 continue
             if not self._stop.is_set():
-                self.rendered.emit(purpose, idx, gen, qimg)
+                self.rendered.emit(purpose, idx, gen, qimg, model)

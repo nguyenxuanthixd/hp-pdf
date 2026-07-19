@@ -276,7 +276,7 @@ class PdfView(QScrollArea):
         """Xay lai layout trang (sau khi xoay/xoa/sap xep...)."""
         pos = self.verticalScrollBar().value() if keep_position else 0
         self.generation += 1
-        self._rt.clear_pending("page")
+        self._rt.clear_pending("page", self.model)
         self._selected = None
         self._draft = None
         self._native_sel = None
@@ -330,7 +330,7 @@ class PdfView(QScrollArea):
         self.fit_mode = fit_mode
         self.zoom = max(MIN_ZOOM, min(MAX_ZOOM, zoom))
         self.generation += 1
-        self._rt.clear_pending("page")
+        self._rt.clear_pending("page", self.model)
         self._resize_pages()
         self._restore_anchor(anchor)
         self._update_timer.start()
@@ -341,7 +341,7 @@ class PdfView(QScrollArea):
         self.fit_mode = mode
         self._apply_fit()
         self.generation += 1
-        self._rt.clear_pending("page")
+        self._rt.clear_pending("page", self.model)
         self._resize_pages()
         self._restore_anchor(anchor)
         self._update_timer.start()
@@ -423,8 +423,10 @@ class PdfView(QScrollArea):
             if (i < lo - 4 or i > hi + 4) and pw.pixmap is not None:
                 pw.pixmap = None
 
-    def _on_rendered(self, purpose: str, index: int, gen: int, img: QImage):
-        if purpose != "page" or gen != self.generation:
+    def _on_rendered(self, purpose: str, index: int, gen: int, img: QImage,
+                     model=None):
+        if purpose != "page" or gen != self.generation \
+                or model is not self.model:
             return
         if index >= len(self._pages):
             return
