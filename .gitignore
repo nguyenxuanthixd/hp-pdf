@@ -32,3 +32,6 @@ desktop.ini
 logo.jpg
 new logo.jpg
 *.jpeg
+# - Anh nguon logo moi (da tao logo.png/logo.ico tu day, giu local)
+LOGO THAY DOI.png
+LOGO 2.jpg
