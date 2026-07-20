@@ -250,6 +250,7 @@ class PdfView(QScrollArea):
         self._band_origin: QPointF | None = None
         self._band_rect: QRectF | None = None
         self.band_mode = "select"  # "select" | "erase"
+        self._pending_click_obj = None  # doi tuong duoi con tro khi bam (chua keo)
         # Keo trang (pan)
         self._panning = False
         self._pan_start = QPoint()
@@ -502,6 +503,8 @@ class PdfView(QScrollArea):
     def _set_selected(self, sel: tuple[int, Annot] | None):
         old = self._selected
         self._selected = sel
+        if sel is not None:
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
         for pair in (old, sel):
             if pair is not None and pair[0] < len(self._pages):
                 self._pages[pair[0]].update()
@@ -517,6 +520,10 @@ class PdfView(QScrollArea):
         old = self._native_sel
         self._native_sel = sel
         self._native_delta = QPointF(0, 0)
+        # Giu focus ban phim cho khung xem de phim mui ten NHICH vung chon
+        # (khong bi cuon trang) sau khi khoanh chon bang chuot.
+        if sel is not None:
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
         for pair in (old, sel):
             if pair is not None and pair[0] < len(self._pages):
                 self._pages[pair[0]].update()
@@ -757,9 +764,9 @@ class PdfView(QScrollArea):
                 self._moving = True
                 return True
             self._set_selected(None)
-            # Bam trong KHUNG BAO cua nhom dang chon -> keo ca nhom
+            # Bam TRONG khung bao cua vung dang chon -> keo ca vung di chuyen
             cur = self._native_sel
-            if cur is not None and cur[0] == pw.index and len(cur[1]) > 1:
+            if cur is not None and cur[0] == pw.index and cur[1]:
                 x0 = min(o.x for o in cur[1])
                 y0 = min(o.y for o in cur[1])
                 x1 = max(o.x + o.w for o in cur[1])
@@ -768,16 +775,9 @@ class PdfView(QScrollArea):
                     self._drag_start = pt
                     self._native_moving = True
                     return True
-            obj = self._hit_native_safe(pw.index, pt)
-            if obj is not None:
-                # Neu bam trung doi tuong da nam trong nhom chon -> keo ca nhom
-                if not (cur is not None and cur[0] == pw.index
-                        and any(o.obj_index == obj.obj_index for o in cur[1])):
-                    self._set_native_sel((pw.index, [obj]))
-                self._drag_start = pt
-                self._native_moving = True
-                return True
-            # Vung trong -> bat dau quet chon theo vung
+            # Con lai: KEO = khoanh chon ca vung (marquee); BAM 1 phat = chon
+            # 1 doi tuong. Nho doi tuong duoi con tro de xu ly khi chi bam.
+            self._pending_click_obj = self._hit_native_safe(pw.index, pt)
             self._set_native_sel(None)
             self.band_mode = "select"
             self._band_page = pw.index
@@ -898,6 +898,12 @@ class PdfView(QScrollArea):
                 objs = self.model.natives_in_region(
                     page, band.x(), band.y(), band.width(), band.height())
                 self._set_native_sel((page, objs) if objs else None)
+            elif mode == "select":
+                # Bam (khong keo) -> chon 1 doi tuong tai diem bam
+                obj = getattr(self, "_pending_click_obj", None)
+                if obj is not None:
+                    self._set_native_sel((page, [obj]))
+            self._pending_click_obj = None
             if page < len(self._pages):
                 self._pages[page].update()
             return True

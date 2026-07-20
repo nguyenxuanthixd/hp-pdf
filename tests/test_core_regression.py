@@ -149,19 +149,28 @@ def t_priority():
     c.showPage()
     c.save()
     m = DocumentModel(pdf)
+    # Cong cu CHON quet vung: uu tien chu (khong keo theo o nen)
     picked = m.natives_in_region(0, 40, 100, 760, 110)
     assert picked and all(o.type == pdfium_c.FPDF_PAGEOBJ_TEXT for o in picked)
     hit = m.hit_native(0, 700, 150)
     assert hit is not None and hit.type == pdfium_c.FPDF_PAGEOBJ_PATH
+    # XOA VUNG (theo toa do that): khoanh TRUM ca o -> xoa SACH ca nen lan chu
     n = m.erase_region(0, 40, 100, 760, 110)
     paths = [o for o in m.native_objects(0)
              if o.type == pdfium_c.FPDF_PAGEOBJ_PATH]
-    assert n == 2 and len(paths) == 1, (n, len(paths))
+    assert n == 3 and len(paths) == 0, (n, len(paths))
+    m.undo()
+    # Khoanh HEP chi trum chu (o nen lo ra ngoai) -> GIU nen, chi xoa chu
+    n2 = m.erase_region(0, 65, 148, 250, 42)
+    paths2 = [o for o in m.native_objects(0)
+              if o.type == pdfium_c.FPDF_PAGEOBJ_PATH]
+    assert n2 == 2 and len(paths2) == 1, (n2, len(paths2))
     m.undo()
     m.close()
 
 
-check("quet vung uu tien CHU, nen chon bang click, xoa vung giu nen", t_priority)
+check("xoa vung theo toa do: trum ca o -> xoa het, hep chi chu -> giu nen",
+      t_priority)
 
 print()
 print(f"KET QUA: {len(passed)} OK, {len(failed)} FAIL")

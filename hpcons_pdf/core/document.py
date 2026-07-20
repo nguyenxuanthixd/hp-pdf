@@ -221,6 +221,9 @@ class DocumentModel:
         self.modified = False
         # Cache textpage cho hover/quet chon chu (dong bang PDFIUM_LOCK)
         self._tp_cache: dict[int, tuple] = {}
+        # Cache khung bao path tinh tu content stream (cho file ma pdfium
+        # khong tra duoc vi tri doi tuong ve). Key: (effective_path, index)
+        self._pathbbox_cache: dict[tuple, dict] = {}
         # Thu muc tam chua cac ban da chinh sua (don khi dong tai lieu)
         self._edit_tmpdirs: list[str] = []
         # Ngan xep hoan tac: (mo ta, ham hoan tac)
@@ -330,6 +333,7 @@ class DocumentModel:
                         except Exception:
                             pass
             self._tp_cache.clear()
+        self._pathbbox_cache.clear()
 
     def text_hit(self, i: int, x: float, y_top: float, tol: float = 4.0) -> int:
         """Chi so ky tu tai diem hien thi (x, y_top); -1 neu khong co chu."""
@@ -418,41 +422,90 @@ class DocumentModel:
         Ho tro ca trang xoay (/Rotate hoac xoay them) nho anh xa toa do.
         """
         ref = self.pages[i]
-        result: list[NativeObj] = []
+        raw: list[tuple] = []   # (obj_index, type, bounds|None, text)
+        geo = None
+        need_fallback = False
         with PDFIUM_LOCK:
             page = ref.source.doc[ref.index]
             try:
                 geo = _page_geometry(page, ref.rotation)
-                _R, _x0, _y0, pw, ph = geo
                 tp = None
                 for k, obj in enumerate(page.get_objects(max_depth=1)):
                     try:
-                        l, b, r, t = obj.get_bounds()
+                        bounds = obj.get_bounds()
                     except Exception:
-                        continue
-                    if r - l < 0.5 or t - b < 0.5:
-                        continue
+                        bounds = None
                     text = ""
-                    if obj.type == pdfium_c.FPDF_PAGEOBJ_TEXT:
-                        if tp is None:
-                            tp = page.get_textpage()
-                        try:
-                            text = tp.get_text_bounded(
-                                left=l, bottom=b, right=r, top=t) or ""
-                        except Exception:
-                            text = ""
-                    # Anh/hinh phu gan het trang = nen -> khong cho chon truc tiep
-                    is_bg = (obj.type != pdfium_c.FPDF_PAGEOBJ_TEXT
-                             and (r - l) >= pw * 0.85
-                             and (t - b) >= ph * 0.85)
-                    dx, dy, dw, dh = _disp_rect_from_page(geo, l, b, r, t)
-                    result.append(NativeObj(obj_index=k, type=obj.type,
-                                            x=dx, y=dy, w=dw, h=dh, text=text,
-                                            background=is_bg))
+                    if bounds is not None and \
+                            obj.type == pdfium_c.FPDF_PAGEOBJ_TEXT:
+                        l, b, r, t = bounds
+                        if r - l >= 0.5 and t - b >= 0.5:
+                            if tp is None:
+                                tp = page.get_textpage()
+                            try:
+                                text = tp.get_text_bounded(
+                                    left=l, bottom=b, right=r, top=t) or ""
+                            except Exception:
+                                text = ""
+                    if bounds is None and \
+                            obj.type == pdfium_c.FPDF_PAGEOBJ_PATH:
+                        need_fallback = True
+                    raw.append((k, obj.type, bounds, text))
                 if tp is not None:
                     tp.close()
             finally:
                 page.close()
+        # pdfium khong tra duoc vi tri net ve -> tinh khung bao tu content stream
+        fb = self._path_bboxes_fallback(ref) if need_fallback else {}
+        _R, _x0, _y0, pw, ph = geo
+        result: list[NativeObj] = []
+        for k, otype, bounds, text in raw:
+            if bounds is None:
+                if otype == pdfium_c.FPDF_PAGEOBJ_PATH and k in fb:
+                    l, b, r, t = fb[k]
+                else:
+                    continue
+            else:
+                l, b, r, t = bounds
+            if r - l < 0.5 or t - b < 0.5:
+                continue
+            # Anh/hinh phu gan het trang = nen -> khong cho chon truc tiep
+            is_bg = (otype != pdfium_c.FPDF_PAGEOBJ_TEXT
+                     and (r - l) >= pw * 0.85 and (t - b) >= ph * 0.85)
+            dx, dy, dw, dh = _disp_rect_from_page(geo, l, b, r, t)
+            result.append(NativeObj(obj_index=k, type=otype,
+                                    x=dx, y=dy, w=dw, h=dh, text=text,
+                                    background=is_bg))
+        return result
+
+    def _path_bboxes_fallback(self, ref: PageRef) -> dict:
+        """Khung bao (l,b,r,t) khong gian trang cho cac doi tuong VE, tinh tu
+        content stream. Dung khi pdfium get_bounds bao loi voi net ve (mot so
+        file khien app khong chon/xoa duoc net ve). Tra ve {obj_index: bbox}.
+        """
+        key = (ref.source.effective_path, ref.index)
+        cached = self._pathbbox_cache.get(key)
+        if cached is not None:
+            return cached
+        from . import surgery
+        result: dict[int, tuple] = {}
+        try:
+            with pikepdf.open(ref.source.effective_path,
+                              password=ref.source.effective_password or "") as pdf:
+                page = pdf.pages[ref.index]
+                instructions = list(pikepdf.parse_content_stream(page))
+            slots = surgery.parse_slots(instructions)
+            types, _rot = self._pdfium_types_and_rot(ref)
+            # Chi tin khi so luong slot khop danh sach doi tuong pdfium
+            # (dam bao obj_index == chi so slot).
+            if len(slots) == len(types):
+                boxes = surgery.slot_bboxes(instructions)
+                for k, (s, bb) in enumerate(zip(slots, boxes)):
+                    if s.kind == "path" and bb is not None:
+                        result[k] = bb
+        except Exception:
+            result = {}
+        self._pathbbox_cache[key] = result
         return result
 
     def hit_native(self, i: int, x: float, y: float) -> NativeObj | None:
@@ -584,15 +637,14 @@ class DocumentModel:
 
     def erase_region(self, i: int, rx: float, ry: float, rw: float,
                      rh: float) -> int:
-        """Xoa thong minh 1 vung: go chu/hinh goc + ghi chu nam trong vung.
+        """Xoa SACH moi thu trong vung khoanh: net ve / chu / anh goc + ghi chu.
 
-        Tat ca gom thanh MOT buoc hoan tac. Tra ve so doi tuong da xoa.
+        Xoa dua tren TOA DO VE THAT trong content stream (khong phu thuoc
+        pdfium get_bounds — co file pdfium bao sai toa do) nen luon xoa dung
+        va het. Tat ca gom MOT buoc hoan tac. Tra ve so doi tuong da xoa.
         """
+        from . import surgery
         ref = self.pages[i]
-        try:
-            objs = self.natives_in_region(i, rx, ry, rw, rh)
-        except FriendlyError:
-            objs = []
 
         def _covered(a) -> bool:
             x, y, w, h = a.bbox()
@@ -604,7 +656,39 @@ class DocumentModel:
             return inter / max(w * h, 0.01) >= 0.5
 
         removed_annots = [a for a in ref.annots if _covered(a)]
-        if not objs and not removed_annots:
+
+        # Vung khoanh (hien thi) -> khung KHONG GIAN TRANG (goc duoi-trai)
+        with PDFIUM_LOCK:
+            page = ref.source.doc[ref.index]
+            try:
+                geo = _page_geometry(page, ref.rotation)
+            finally:
+                page.close()
+        R, x0, y0, pw, ph = geo
+        gpts = []
+        for dx, dy in ((rx, ry), (rx + rw, ry), (rx, ry + rh),
+                       (rx + rw, ry + rh)):
+            gx, gy = _page_from_disp(R, pw, ph, dx, dy)
+            gpts.append((gx + x0, gy + y0))
+        xs = [p[0] for p in gpts]
+        ys = [p[1] for p in gpts]
+        region = (min(xs), min(ys), max(xs), max(ys))
+
+        n = 0
+        tmp = None
+        src = ref.source
+        try:
+            tmpdir = make_temp_dir()
+            self._edit_tmpdirs.append(tmpdir)
+            tmp = os.path.join(tmpdir, "xoa-vung.pdf")
+            n = surgery.erase_by_region(
+                src.effective_path, src.effective_password, ref.index,
+                region, tmp)
+        except FriendlyError:
+            n = 0
+            tmp = None
+
+        if n <= 0 and not removed_annots:
             return 0
         annots_before = list(ref.annots)
         ref.annots = [a for a in ref.annots if a not in removed_annots]
@@ -612,14 +696,13 @@ class DocumentModel:
         def _restore_annots():
             ref.annots = annots_before
 
-        if objs:
-            tmp = self._surgery(i, objs, [])
-            self._adopt_edited_file(ref.source, tmp, "xóa vùng",
+        if n > 0 and tmp:
+            self._adopt_edited_file(src, tmp, "xóa vùng",
                                     extra_undo=_restore_annots)
         else:
             self.modified = True
             self.push_undo("xóa vùng", _restore_annots)
-        return len(objs) + len(removed_annots)
+        return n + len(removed_annots)
 
     def move_natives(self, i: int, objs: list[NativeObj], dx: float, dy: float):
         """Di chuyen cac doi tuong goc theo do lech HIEN THI (point).
