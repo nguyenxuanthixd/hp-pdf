@@ -5,7 +5,7 @@
 ; ============================================================
 
 #define AppName "HP Cons PDF"
-#define AppVersion "1.0.6"
+#define AppVersion "1.0.7"
 #define AppPublisher "Cong ty CP Xay dung Cong nghiep Hung Phuoc"
 #define AppExe "HPConsPDF.exe"
 
