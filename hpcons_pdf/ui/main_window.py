@@ -5,7 +5,7 @@ import os
 
 from PyQt6.QtCore import QPoint, QSize, Qt, QTimer
 from PyQt6.QtGui import (QAction, QActionGroup, QColor, QIcon, QKeySequence,
-                         QPixmap)
+                         QPixmap, QShortcut)
 from PyQt6.QtWidgets import (QColorDialog, QComboBox, QFileDialog,
                              QInputDialog, QLabel, QLineEdit, QMainWindow,
                              QMenu, QMessageBox, QPushButton, QSizePolicy,
@@ -47,6 +47,8 @@ HL_LABELS = {
 class MainWindow(QMainWindow):
     # Tat ca cua so dang mo (cua so dau tien la cua so chinh)
     _instances: list["MainWindow"] = []
+    # Clipboard trang DUNG CHUNG moi cua so (copy trang giua cac cua so)
+    _page_clipboard: list[dict] = []
 
     def __init__(self):
         super().__init__()
@@ -63,19 +65,44 @@ class MainWindow(QMainWindow):
         self.annot_color = "#E53935"
         self._current_shape = "rect"
         self.sidebar_visible = True
-        # Clipboard trang (dung chung giua cac tab)
-        self.page_clipboard: list[dict] = []
-
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
         self.tabs.setMovable(True)
+        # Nhieu tab -> cuon + rut gon ten, KHONG mat tab nao
+        self.tabs.setUsesScrollButtons(True)
+        self.tabs.setElideMode(Qt.TextElideMode.ElideRight)
+        self.tabs.tabBar().setExpanding(False)
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        # Nut goc phai: danh sach TAT CA file dang mo (bam de nhay toi)
+        self._tab_list_btn = QToolButton()
+        self._tab_list_btn.setText("☰ Danh sách")
+        self._tab_list_btn.setToolTip("Danh sách tất cả file đang mở")
+        self._tab_list_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tab_list_btn.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._tab_list_btn.setStyleSheet(
+            "QToolButton{background:#1B75BB;color:white;border:none;"
+            "border-radius:4px;padding:3px 10px;margin:2px 6px;"
+            "font-weight:bold;font-size:10pt;}"
+            "QToolButton:hover{background:#155a90;}"
+            "QToolButton::menu-indicator{image:none;}")
+        self._tab_list_menu = QMenu(self._tab_list_btn)
+        self._tab_list_btn.setMenu(self._tab_list_menu)
+        self._tab_list_menu.aboutToShow.connect(self._fill_tab_list_menu)
+        self.tabs.setCornerWidget(self._tab_list_btn, Qt.Corner.TopRightCorner)
         # Chuot phai tab + keo tab ra ngoai de tach cua so
         bar = self.tabs.tabBar()
         bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         bar.customContextMenuRequested.connect(self._tab_context_menu)
         bar.installEventFilter(self)
+        # Chuyen tab bang Ctrl+Tab / Ctrl+Shift+Tab (thay cho cuon chuot)
+        sc_next = QShortcut(QKeySequence("Ctrl+Tab"), self)
+        sc_next.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        sc_next.activated.connect(lambda: self._cycle_tab(1))
+        sc_prev = QShortcut(QKeySequence("Ctrl+Shift+Tab"), self)
+        sc_prev.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        sc_prev.activated.connect(lambda: self._cycle_tab(-1))
 
         central = QWidget()
         lay = QVBoxLayout(central)
@@ -576,7 +603,7 @@ class MainWindow(QMainWindow):
         tab.thumbs.pdfFilesDropped.connect(self._merge_dropped_files)
         tab.thumbs.copyRequested.connect(self._copy_pages)
         tab.thumbs.pasteRequested.connect(self._paste_pages)
-        tab.thumbs.clipboard_count = lambda: len(self.page_clipboard)
+        tab.thumbs.clipboard_count = lambda: len(MainWindow._page_clipboard)
         tab.view.panRequested.connect(self._back_to_pan)
         tab.sidebarToggleRequested.connect(self._toggle_sidebar_from_button)
 
@@ -653,6 +680,21 @@ class MainWindow(QMainWindow):
         target.raise_()
         target.activateWindow()
 
+    def _fill_tab_list_menu(self):
+        """Menu liet ke TAT CA file dang mo trong cua so nay -> nhay toi."""
+        self._tab_list_menu.clear()
+        cur = self.tabs.currentIndex()
+        for i in range(self.tabs.count()):
+            w = self.tabs.widget(i)
+            if not isinstance(w, DocumentTab):
+                continue
+            name = w.model.display_name
+            a = self._tab_list_menu.addAction(
+                ("● " if i == cur else "     ") + name)
+            a.triggered.connect(lambda _c=False, idx=i: self.tabs.setCurrentIndex(idx))
+        if self._tab_list_menu.isEmpty():
+            self._tab_list_menu.addAction("(Chưa mở file nào)").setEnabled(False)
+
     def _tab_context_menu(self, pos):
         bar = self.tabs.tabBar()
         index = bar.tabAt(pos)
@@ -683,10 +725,18 @@ class MainWindow(QMainWindow):
         elif chosen in move_map:
             self._move_tab_to(index, move_map[chosen])
 
+    def _cycle_tab(self, delta: int):
+        n = self.tabs.count()
+        if n > 1:
+            self.tabs.setCurrentIndex((self.tabs.currentIndex() + delta) % n)
+
     def eventFilter(self, obj, event):
         # Keo tab ra ngoai thanh tab -> tach thanh cua so rieng
         if obj is self.tabs.tabBar():
             et = event.type()
+            # Chan CUON CHUOT doi tab (hay bam nham) -> dung Ctrl+Tab thay the
+            if et == event.Type.Wheel:
+                return True
             if et == event.Type.MouseButtonPress and \
                     event.button() == Qt.MouseButton.LeftButton:
                 self._drag_tab_index = obj.tabAt(event.position().toPoint())
@@ -694,15 +744,27 @@ class MainWindow(QMainWindow):
                     event.button() == Qt.MouseButton.LeftButton:
                 idx = self._drag_tab_index
                 self._drag_tab_index = None
-                if idx is not None and idx >= 0:
+                if idx is not None and idx >= 0 and \
+                        isinstance(self.tabs.widget(idx), DocumentTab):
                     gp = event.globalPosition().toPoint()
                     from PyQt6.QtCore import QRect
-                    bar_rect = QRect(obj.mapToGlobal(QPoint(0, 0)), obj.size())
-                    zone = bar_rect.adjusted(-60, -40, 60, 120)
-                    if not zone.contains(gp) and \
-                            isinstance(self.tabs.widget(idx), DocumentTab):
+                    # Tha len cua so KHAC -> gop tab vao cua so do (keo ve/qua lai)
+                    target = None
+                    for w in MainWindow._instances:
+                        if w is not self and w.isVisible() and \
+                                w.frameGeometry().contains(gp):
+                            target = w
+                            break
+                    if target is not None:
                         QTimer.singleShot(
-                            0, lambda i=idx, g=gp: self.detach_tab(i, g))
+                            0, lambda i=idx, t=target: self._move_tab_to(i, t))
+                    else:
+                        bar_rect = QRect(obj.mapToGlobal(QPoint(0, 0)),
+                                         obj.size())
+                        zone = bar_rect.adjusted(-60, -40, 60, 120)
+                        if not zone.contains(gp):
+                            QTimer.singleShot(
+                                0, lambda i=idx, g=gp: self.detach_tab(i, g))
         return super().eventFilter(obj, event)
 
     def _close_tab(self, index: int):
@@ -1039,17 +1101,17 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         if not tab or not pages:
             return
-        self.page_clipboard = tab.model.copy_page_data(pages)
+        MainWindow._page_clipboard = tab.model.copy_page_data(pages)
         self.statusBar().showMessage(
             f"Đã copy {len(pages)} trang — chuột phải hoặc Ctrl+V trên thanh "
-            "trang thu nhỏ để dán.", 6000)
+            "trang thu nhỏ để dán (kể cả ở cửa sổ khác).", 6000)
 
     def _paste_pages(self, at: int):
         tab = self.current_tab()
-        if not tab or not self.page_clipboard:
+        if not tab or not MainWindow._page_clipboard:
             return
         try:
-            n = tab.model.paste_pages(self.page_clipboard, at)
+            n = tab.model.paste_pages(MainWindow._page_clipboard, at)
         except Exception as e:
             show_error(self, friendly_message(e))
             return
@@ -1124,13 +1186,35 @@ class MainWindow(QMainWindow):
         worker.failed.connect(fail)
         worker.start()
 
-    def _offer_update(self, info):
-        from ..utils.fileutils import human_size
+    @staticmethod
+    def _clean_notes(raw: str) -> str:
+        """Loc noi dung cap nhat: bo dong chua LINK/URL va tieu de tu dong
+        cua GitHub (What's Changed / Full Changelog) -> chi con noi dung."""
+        out = []
+        for ln in (raw or "").splitlines():
+            s = ln.strip()
+            low = s.lower()
+            if "http://" in low or "https://" in low:
+                continue
+            if low.startswith("full changelog"):
+                continue
+            if low in ("## what's changed", "what's changed", "##"):
+                continue
+            # bo ky hieu markdown dau dong cho de doc
+            s = s.lstrip("#").strip()
+            if s.startswith("* "):
+                s = "•" + s[1:]
+            out.append(s)
+        text = "\n".join(out).strip()
+        return text
 
+    def _offer_update(self, info):
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
         box.setWindowTitle("Có bản cập nhật mới")
-        notes = info.notes[:1200] + ("..." if len(info.notes) > 1200 else "")
+        notes = self._clean_notes(info.notes)
+        if len(notes) > 1500:
+            notes = notes[:1500] + "..."
         box.setText(
             f"Đã có phiên bản mới <b>{info.version}</b> "
             f"(bạn đang dùng {APP_VERSION}).")

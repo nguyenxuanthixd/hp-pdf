@@ -42,9 +42,12 @@ jobs:
       - name: Build file cai dat
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
 
+      - name: Lay noi dung cap nhat tu CHANGELOG
+        run: python tools/changelog.py "${{ github.ref_name }}" > release_notes.txt
+
       - name: Dang Release + dinh kem installer
         uses: softprops/action-gh-release@v2
         with:
           name: "HP Cons PDF ${{ github.ref_name }}"
-          generate_release_notes: true
+          body_path: release_notes.txt
           files: Output/HPConsPDF_Setup_*.exe
