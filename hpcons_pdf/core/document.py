@@ -323,6 +323,43 @@ class DocumentModel:
                             pass
             return tp, geo
 
+    def sample_bg_color(self, i: int, x: float, y: float, w: float,
+                        h: float) -> str:
+        """Lay mau NEN o VIEN vung (x,y,w,h hien thi) -> hex, de che trang
+        theo mau nen (vd file scan nen nga/xam). '' neu khong lay duoc."""
+        try:
+            pw, ph = self.page_size(i)
+            scale = min(2.0, max(0.5, 1400.0 / max(pw, ph, 1)))
+            pil = self.render_page(i, scale).convert("RGB")
+            W, H = pil.size
+            px = pil.load()
+            x0, y0 = int(x * scale), int(y * scale)
+            x1, y1 = int((x + w) * scale), int((y + h) * scale)
+            x0 = max(0, min(W - 1, x0))
+            x1 = max(0, min(W, x1))
+            y0 = max(0, min(H - 1, y0))
+            y1 = max(0, min(H, y1))
+            if x1 - x0 < 2 or y1 - y0 < 2:
+                return ""
+            samples = []
+            sx = max(1, (x1 - x0) // 40)
+            for xx in range(x0, x1, sx):
+                samples.append(px[xx, y0])
+                samples.append(px[xx, y1 - 1])
+            sy = max(1, (y1 - y0) // 40)
+            for yy in range(y0, y1, sy):
+                samples.append(px[x0, yy])
+                samples.append(px[x1 - 1, yy])
+            if not samples:
+                return ""
+            rs = sorted(s[0] for s in samples)
+            gs = sorted(s[1] for s in samples)
+            bs = sorted(s[2] for s in samples)
+            m = len(samples) // 2
+            return "#%02X%02X%02X" % (rs[m], gs[m], bs[m])
+        except Exception:
+            return ""
+
     def _invalidate_tp_cache(self):
         with PDFIUM_LOCK:
             for pg, t, _g in self._tp_cache.values():
@@ -335,19 +372,31 @@ class DocumentModel:
             self._tp_cache.clear()
         self._pathbbox_cache.clear()
 
-    def text_hit(self, i: int, x: float, y_top: float, tol: float = 4.0) -> int:
-        """Chi so ky tu tai diem hien thi (x, y_top); -1 neu khong co chu."""
-        tp, geo = self._get_textpage(i)
-        if tp is None:
+    def text_hit(self, i: int, x: float, y_top: float, tol: float = 4.0,
+                 wait: bool = True) -> int:
+        """Chi so ky tu tai diem hien thi (x, y_top); -1 neu khong co chu.
+
+        wait=False: neu luong render dang giu khoa pdfium (trang nang) thi
+        BO QUA ngay (tra -1) thay vi cho — dung cho hover de giao dien khong
+        bi dung khi chuyen trang tren file ban ve nang.
+        """
+        if not wait and not PDFIUM_LOCK.acquire(blocking=False):
             return -1
-        R, x0, y0, pw, ph = geo
-        px, py = _page_from_disp(R, pw, ph, x, y_top)
-        with PDFIUM_LOCK:
-            try:
-                idx = tp.get_index(x0 + px, y0 + py, tol, tol)
-            except Exception:
+        try:
+            tp, geo = self._get_textpage(i)
+            if tp is None:
                 return -1
-        return idx if idx is not None and idx >= 0 else -1
+            R, x0, y0, pw, ph = geo
+            px, py = _page_from_disp(R, pw, ph, x, y_top)
+            with PDFIUM_LOCK:
+                try:
+                    idx = tp.get_index(x0 + px, y0 + py, tol, tol)
+                except Exception:
+                    return -1
+            return idx if idx is not None and idx >= 0 else -1
+        finally:
+            if not wait:
+                PDFIUM_LOCK.release()
 
     def text_range(self, i: int, a: int, b: int):
         """Chu + khung highlight cua khoang ky tu [a, b] (hien thi, tren-trai).

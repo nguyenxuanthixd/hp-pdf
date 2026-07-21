@@ -802,13 +802,24 @@ class MainWindow(QMainWindow):
         def get_preview(page_index, max_px):
             return self._render_preview_pixmap(tab, page_index, max_px)
 
+        prefs = config.get("print_prefs", {}) or {}
         dlg = PrintDialog(tab.model.page_count, tab.view.current_page,
                           names, default_name, last, int(self.winId()),
-                          get_preview, self)
+                          get_preview, self, prefs=prefs)
         if not dlg.exec():
             return
         name = dlg.selected_printer()
         config.set("last_printer", name)
+        # Nho tuy chinh in cho lan sau
+        config.set("print_prefs", {
+            "copies": dlg.copies(),
+            "color": dlg.color_mode(),
+            "paper": dlg.paper(),
+            "duplex": dlg.duplex(),
+            "orientation": dlg.orientation(),
+            "scale_mode": dlg.scale_mode(),
+            "custom_percent": dlg.custom_percent(),
+        })
         pages = dlg.page_indices()
 
         # Ap thiet lap tu hop thoai vao DEVMODE (huong giay, den trang).

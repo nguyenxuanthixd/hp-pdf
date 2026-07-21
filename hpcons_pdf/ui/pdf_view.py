@@ -126,6 +126,20 @@ class _PageWidget(QWidget):
             super().mouseDoubleClickEvent(event)
 
 
+# Ten phong (theo overlay._FONT_FILES) -> (ho QFont, in dam) de ve xem truoc
+_QFONT_MAP = {
+    "Arial": ("Arial", False),
+    "Arial đậm": ("Arial", True),
+    "Times New Roman": ("Times New Roman", False),
+    "Segoe UI": ("Segoe UI", False),
+    "Microsoft YaHei (Trung)": ("Microsoft YaHei", False),
+}
+
+
+def _qfont_family(name: str) -> tuple[str, bool]:
+    return _QFONT_MAP.get(name, ("Arial", False))
+
+
 def _draw_annot(p: QPainter, a: Annot, z: float, selected: bool):
     col = QColor(a.color)
     if a.kind == "highlight":
@@ -135,9 +149,9 @@ def _draw_annot(p: QPainter, a: Annot, z: float, selected: bool):
         p.setBrush(c)
         p.drawRect(QRectF(a.x * z, a.y * z, a.w * z, a.h * z))
     elif a.kind == "whiteout":
-        # Che trang: to trang + vien mo (vien chi hien tren man hinh)
+        # Che: to theo MAU NEN (mac dinh trang) + vien mo (chi tren man hinh)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor("#FFFFFF"))
+        p.setBrush(QColor(a.color or "#FFFFFF"))
         p.drawRect(QRectF(a.x * z, a.y * z, a.w * z, a.h * z))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(QColor(0, 0, 0, 28), 1, Qt.PenStyle.DashLine))
@@ -182,8 +196,14 @@ def _draw_annot(p: QPainter, a: Annot, z: float, selected: bool):
             path.lineTo(QPointF(px * z, py * z))
         p.drawPath(path)
     elif a.kind == "text" and a.text:
+        bg = getattr(a, "bg_color", "")
+        if bg:
+            p.fillRect(QRectF(a.x * z - 1, a.y * z - 1,
+                              a.w * z + 2, a.h * z + 2), QColor(bg))
         p.setPen(QPen(col))
-        f = QFont("Segoe UI")
+        fam, bold = _qfont_family(getattr(a, "font", "Arial"))
+        f = QFont(fam)
+        f.setBold(bold)
         f.setPixelSize(max(2, int(a.font_size * z)))
         p.setFont(f)
         for i, line in enumerate(a.text.split("\n")):
@@ -677,9 +697,16 @@ class PdfView(QScrollArea):
     def handle_hover(self, pw: _PageWidget, pt: QPointF):
         if self.tool != "pan" or self.model is None:
             return
+        # Re vao ghi chu minh them -> con tro di chuyen (keo duoc ngay)
+        if self._hit_annot(pw.index, pt) is not None:
+            pw.setCursor(Qt.CursorShape.SizeAllCursor)
+            return
+        # wait=False: dang render trang nang thi bo qua, KHONG cho khoa pdfium
+        # (tranh dung giao dien khi re chuot luc chuyen trang)
         idx = -1
         for tol in (5, 12):
-            idx = self.model.text_hit(pw.index, pt.x(), pt.y(), tol=tol)
+            idx = self.model.text_hit(pw.index, pt.x(), pt.y(), tol=tol,
+                                      wait=False)
             if idx >= 0:
                 break
         pw.setCursor(Qt.CursorShape.IBeamCursor if idx >= 0
@@ -691,12 +718,19 @@ class PdfView(QScrollArea):
             return False
         self.flush_pending_edits()
         if event.button() == Qt.MouseButton.RightButton:
-            if self.tool == "pan" and self._tsel_text.strip():
-                menu = QMenu(self)
-                act_copy = menu.addAction("Copy chữ đã chọn\tCtrl+C")
-                if menu.exec(event.globalPosition().toPoint()) == act_copy:
-                    self.copy_selected_text()
-                return True
+            if self.tool == "pan":
+                # Chuot phai trung ghi chu minh them -> menu (sua/xoa/mau...)
+                a = self._hit_annot(pw.index, pt)
+                if a is not None:
+                    self._set_selected((pw.index, a))
+                    self._show_annot_menu(pw, a, event)
+                    return True
+                if self._tsel_text.strip():
+                    menu = QMenu(self)
+                    act_copy = menu.addAction("Copy chữ đã chọn\tCtrl+C")
+                    if menu.exec(event.globalPosition().toPoint()) == act_copy:
+                        self.copy_selected_text()
+                    return True
             if self.tool == "select":
                 a = self._hit_annot(pw.index, pt)
                 if a is not None:
@@ -714,6 +748,17 @@ class PdfView(QScrollArea):
             return False
 
         if self.tool == "pan":
+            # Bam trung GHI CHU minh them (chu/hinh/che trang) -> chon + keo
+            # di chuyen ngay, khong can chuyen sang cong cu Chon.
+            a = self._hit_annot(pw.index, pt)
+            if a is not None:
+                self.clear_text_selection()
+                self._set_native_sel(None)
+                self._set_selected((pw.index, a))
+                self._drag_start = pt
+                self._annot_start = (a.x, a.y)
+                self._moving = True
+                return True
             self.clear_text_selection()
             # Do 2 muc dung sai de bat dau quet duoc ca khi bam trung
             # phan gach chan ngay duoi chan chu
@@ -826,10 +871,12 @@ class PdfView(QScrollArea):
         if self._tsel_dragging:
             if pw.index == self._tsel_page:
                 # Mo rong dan vung bam chu: khong dut chon khi re qua
-                # gach chan, khoang trang giua cac tu hay lech dong
+                # gach chan, khoang trang giua cac tu hay lech dong.
+                # wait=False de keo chon khong dung khi render nen ban.
                 idx = -1
                 for tol in (6, 14, 28):
-                    idx = self.model.text_hit(pw.index, pt.x(), pt.y(), tol=tol)
+                    idx = self.model.text_hit(pw.index, pt.x(), pt.y(),
+                                              tol=tol, wait=False)
                     if idx >= 0:
                         break
                 if idx >= 0:
@@ -945,6 +992,11 @@ class PdfView(QScrollArea):
             x, y, w, h = a.bbox()
             big_enough = (w > 2 or h > 2) if a.kind != "pen" else len(a.points) >= 3
             if big_enough and pw.index < self.model.page_count:
+                # Che trang: lay mau NEN quanh vung de che khop nen (file scan)
+                if a.kind == "whiteout":
+                    bg = self.model.sample_bg_color(self._draft_page, x, y, w, h)
+                    if bg:
+                        a.color = bg
                 ref = self.model.pages[self._draft_page]
                 ref.annots.append(a)
                 desc = "che trắng vùng" if a.kind == "whiteout" else "vẽ/đánh dấu"
@@ -976,6 +1028,11 @@ class PdfView(QScrollArea):
         if self.model is None:
             return False
         if self.tool == "pan":
+            # Bam dup vao chu MINH THEM -> sua noi dung luon
+            a = self._hit_annot(pw.index, pt)
+            if a is not None and a.kind == "text":
+                self._edit_text(pw.index, a)
+                return True
             idx = self.model.text_hit(pw.index, pt.x(), pt.y())
             if idx >= 0:
                 a, b = self.model.word_at(pw.index, idx)
@@ -999,13 +1056,26 @@ class PdfView(QScrollArea):
 
     # ----- Chu (ghi chu) -----
     def _create_text(self, index: int, pt: QPointF):
-        text, ok = QInputDialog.getMultiLineText(
-            self, "Thêm chữ", "Nội dung (Enter xuống dòng):", "")
-        if not ok or not text.strip():
+        from ..config import config
+        from .dialogs.text_annot import TextAnnotDialog
+        dlg = TextAnnotDialog(
+            self, title="Thêm chữ",
+            font=config.get("annot_font", "Arial"),
+            size=config.get("annot_font_size", 14),
+            color=self.annot_color,
+            bg=config.get("annot_bg", ""))
+        if not dlg.exec():
             return
-        a = Annot(kind="text", x=pt.x(), y=pt.y(), text=text.strip(),
-                  color=self.annot_color, font_size=14.0)
-        a.w, a.h = measure_text(a.text, a.font_size)
+        v = dlg.values()
+        if not v["text"]:
+            return
+        config.set("annot_font", v["font"])
+        config.set("annot_font_size", v["size"])
+        config.set("annot_bg", v["bg"])
+        a = Annot(kind="text", x=pt.x(), y=pt.y(), text=v["text"],
+                  color=v["color"], font_size=v["size"], font=v["font"],
+                  bg_color=v["bg"])
+        a.w, a.h = measure_text(a.text, a.font_size, a.font)
         ref = self.model.pages[index]
         ref.annots.append(a)
         self.model.push_undo(
@@ -1015,13 +1085,18 @@ class PdfView(QScrollArea):
         self.toolFinished.emit()
 
     def _edit_text(self, index: int, a: Annot):
-        text, ok = QInputDialog.getMultiLineText(
-            self, "Sửa chữ", "Nội dung:", a.text)
-        if not ok:
+        from .dialogs.text_annot import TextAnnotDialog
+        dlg = TextAnnotDialog(
+            self, title="Sửa chữ", text=a.text,
+            font=getattr(a, "font", "Arial"), size=a.font_size,
+            color=a.color, bg=getattr(a, "bg_color", ""))
+        if not dlg.exec():
             return
+        v = dlg.values()
         ref = self.model.pages[index]
-        old = (a.text, a.w, a.h)
-        if not text.strip():
+        old = (a.text, a.w, a.h, a.color, a.font_size,
+               getattr(a, "font", "Arial"), getattr(a, "bg_color", ""))
+        if not v["text"]:
             pos = ref.annots.index(a) if a in ref.annots else 0
             if a in ref.annots:
                 ref.annots.remove(a)
@@ -1029,11 +1104,16 @@ class PdfView(QScrollArea):
                                  lambda: ref.annots.insert(pos, a))
             self._selected = None
         else:
-            a.text = text.strip()
-            a.w, a.h = measure_text(a.text, a.font_size)
+            a.text = v["text"]
+            a.color = v["color"]
+            a.font_size = v["size"]
+            a.font = v["font"]
+            a.bg_color = v["bg"]
+            a.w, a.h = measure_text(a.text, a.font_size, a.font)
 
             def _undo():
-                a.text, a.w, a.h = old
+                (a.text, a.w, a.h, a.color, a.font_size,
+                 a.font, a.bg_color) = old
             self.model.push_undo("sửa ghi chú", _undo)
         self._pages[index].update()
         self._mark_changed()

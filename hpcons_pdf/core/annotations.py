@@ -30,6 +30,8 @@ class Annot:
     opacity: float = 1.0
     text: str = ""
     font_size: float = 14.0
+    font: str = "Arial"       # ten phong chu (theo overlay._FONT_FILES)
+    bg_color: str = ""        # mau nen o chu (rong = khong nen)
 
     def bbox(self) -> tuple[float, float, float, float]:
         if self.kind in ("line", "pen", "arrow") and self.points:
@@ -55,10 +57,19 @@ def _hex_rgb(hex_color: str) -> tuple[float, float, float]:
             int(s[4:6], 16) / 255.0)
 
 
-def measure_text(text: str, font_size: float) -> tuple[float, float]:
-    """Uoc luong khung chu (point) de hit-test tren man hinh."""
+def measure_text(text: str, font_size: float,
+                 font: str = "Arial") -> tuple[float, float]:
+    """Khung chu (point) de hit-test + ve nen. Do be rong that theo phong
+    neu do duoc, khong thi uoc luong."""
     lines = text.split("\n") or [""]
-    w = max((len(ln) for ln in lines), default=1) * font_size * 0.55
+    w = 0.0
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        fname = _register_font(pick_font_for_text(text, font or "Arial"))
+        for ln in lines:
+            w = max(w, pdfmetrics.stringWidth(ln, fname, font_size))
+    except Exception:
+        w = max((len(ln) for ln in lines), default=1) * font_size * 0.55
     h = len(lines) * font_size * 1.3
     return (max(w, font_size), max(h, font_size))
 
@@ -74,7 +85,9 @@ def draw_annots(c: canvas.Canvas, annots: list[Annot], page_h: float,
 
         if a.kind == "whiteout":
             c.saveState()
-            c.setFillColor(Color(1, 1, 1))
+            # To theo MAU NEN da lay mau (mac dinh trang neu chua co)
+            wr, wg, wb = _hex_rgb(a.color) if a.color else (1.0, 1.0, 1.0)
+            c.setFillColor(Color(wr, wg, wb))
             c.rect(off_x + a.x, fy(a.y + a.h), a.w, a.h, stroke=0, fill=1)
             c.restoreState()
         elif a.kind == "highlight":
@@ -137,8 +150,15 @@ def draw_annots(c: canvas.Canvas, annots: list[Annot], page_h: float,
             c.drawPath(path, stroke=1, fill=0)
             c.restoreState()
         elif a.kind == "text" and a.text:
-            font = _register_font(pick_font_for_text(a.text, "Arial"))
+            pref = getattr(a, "font", "") or "Arial"
+            font = _register_font(pick_font_for_text(a.text, pref))
             c.saveState()
+            bg = getattr(a, "bg_color", "")
+            if bg:
+                br, bgc, bb = _hex_rgb(bg)
+                c.setFillColor(Color(br, bgc, bb))
+                c.rect(off_x + a.x - 1, fy(a.y + a.h) - 1,
+                       a.w + 2, a.h + 2, fill=1, stroke=0)
             c.setFillColor(Color(r, g, b, alpha=a.opacity))
             c.setFont(font, a.font_size)
             for i, line in enumerate(a.text.split("\n")):

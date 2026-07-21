@@ -16,8 +16,10 @@ from ...utils.fileutils import parse_page_ranges
 class PrintDialog(QDialog):
     def __init__(self, page_count: int, current_page: int,
                  printer_names: list[str], default_name: str,
-                 last_name: str, hwnd: int, get_preview, parent=None):
-        """get_preview(page_index, max_px) -> QPixmap (de xem truoc)."""
+                 last_name: str, hwnd: int, get_preview, parent=None,
+                 prefs: dict | None = None):
+        """get_preview(page_index, max_px) -> QPixmap (de xem truoc).
+        prefs: thiet lap in lan truoc de nap lai (nho tuy chinh)."""
         super().__init__(parent)
         self.setWindowTitle("In tài liệu")
         self.setMinimumSize(820, 560)
@@ -195,7 +197,46 @@ class PrintDialog(QDialog):
             rb.toggled.connect(self._sync_preview_to_range)
 
         self._load_devmode(self.cb_printer.currentText())
+        self._apply_prefs(prefs or {})
         self._refresh_preview()
+
+    def _apply_prefs(self, p: dict):
+        """Nap lai thiet lap in lan truoc (so ban / mau / kho giay / mat /
+        huong / ti le)."""
+        def pick(combo, val):
+            # None/"theo may in" -> o dau tien; con lai tim theo data
+            if val is None:
+                combo.setCurrentIndex(0)
+                return
+            for i in range(combo.count()):
+                if combo.itemData(i) == val:
+                    combo.setCurrentIndex(i)
+                    return
+
+        if p.get("copies"):
+            self.sp_copies.setValue(int(p["copies"]))
+        if "color" in p:
+            pick(self.cb_color, p["color"])
+        if "paper" in p:
+            pick(self.cb_paper, p["paper"])
+        if "duplex" in p:
+            pick(self.cb_duplex, p["duplex"])
+        orient = p.get("orientation")
+        if orient == "auto":
+            self.rb_auto.setChecked(True)
+        elif orient == "portrait":
+            self.rb_port.setChecked(True)
+        elif orient == "landscape":
+            self.rb_land.setChecked(True)
+        sm = p.get("scale_mode")
+        if sm == "actual":
+            self.rb_actual.setChecked(True)
+        elif sm == "custom":
+            self.rb_custom.setChecked(True)
+        elif sm == "fit":
+            self.rb_fit.setChecked(True)
+        if p.get("custom_percent"):
+            self.sp_pct.setValue(float(p["custom_percent"]))
 
     # ---------------- Xem truoc ----------------
     def _step(self, d: int):
