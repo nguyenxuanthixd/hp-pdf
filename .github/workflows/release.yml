@@ -43,7 +43,7 @@ jobs:
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
 
       - name: Lay noi dung cap nhat tu CHANGELOG
-        run: python tools/changelog.py "${{ github.ref_name }}" > release_notes.txt
+        run: python tools/changelog.py "${{ github.ref_name }}" release_notes.txt
 
       - name: Dang Release + dinh kem installer
         uses: softprops/action-gh-release@v2

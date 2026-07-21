@@ -1,8 +1,9 @@
-"""In noi dung cap nhat cua 1 phien ban tu CHANGELOG.md.
+"""Trich noi dung cap nhat cua 1 phien ban tu CHANGELOG.md.
 
 Dung trong GitHub Actions de dat lam noi dung Release (thay vi link github).
-    python tools/changelog.py v1.0.9  > notes.txt
-Neu khong tim thay muc -> in dong mac dinh (khong loi).
+    python tools/changelog.py v1.0.9 release_notes.txt   (ghi ra file UTF-8)
+    python tools/changelog.py v1.0.9                      (in ra stdout UTF-8)
+Neu khong tim thay muc -> dong mac dinh (khong loi).
 """
 import os
 import sys
@@ -33,7 +34,13 @@ def section_for(version: str) -> str:
 
 if __name__ == "__main__":
     v = sys.argv[1] if len(sys.argv) > 1 else ""
+    out = sys.argv[2] if len(sys.argv) > 2 else ""
     text = section_for(v)
     if not text:
         text = f"Phiên bản {v.lstrip('vV')} — xem chi tiết trong ứng dụng."
-    sys.stdout.write(text + "\n")
+    data = (text + "\n").encode("utf-8")
+    if out:
+        with open(out, "wb") as f:   # UTF-8, tranh loi ma hoa tren Windows CI
+            f.write(data)
+    else:
+        sys.stdout.buffer.write(data)
