@@ -46,6 +46,8 @@ LOGPIXELSY = 90
 BI_RGB = 0
 DIB_RGB_COLORS = 0
 SRCCOPY = 0x00CC0020
+HALFTONE = 4       # SetStretchBltMode: muot khi THU NHO (anti-alias)
+COLORONCOLOR = 3   # SetStretchBltMode: net khi giu nguyen/phong (khong nhoe)
 
 CANCELLED = object()
 UNAVAILABLE = object()
@@ -203,7 +205,10 @@ def prompt_devmode(name: str, hwnd: int = 0, devmode_in: bytes | None = None):
 def gdi_print(name: str, devmode_bytes: bytes | None, page_indices: list[int],
               get_bgr, doc_name: str = "HP Cons PDF",
               progress=None, cancel=None, output_file: str | None = None,
-              scale_mode: str = "fit", custom_percent: float = 100.0):
+              scale_mode: str = "fit", custom_percent: float = 100.0,
+              draw_page=None):
+    """draw_page(hdc, i, hres, vres, dpi_x, dpi_y): ve trang TRUC TIEP len DC
+    (in VECTOR, net nhat). Neu co -> dung thay get_bgr (in anh)."""
     """In qua GDI. get_bgr(i, max_w_px, max_h_px) -> (w, h, bytes_bgr_topdown,
     render_dpi) hoac None de bo qua trang. Tra ve so trang da in / UNAVAILABLE.
     scale_mode: 'fit' (vua le giay) | 'actual' (co that 100%) | 'custom' (%)."""
@@ -225,6 +230,9 @@ def gdi_print(name: str, devmode_bytes: bytes | None, page_indices: list[int],
         ctypes.c_void_p, ctypes.POINTER(BITMAPINFOHEADER),
         wintypes.UINT, wintypes.DWORD]
     gdi.StretchDIBits.restype = ctypes.c_int
+    gdi.SetStretchBltMode.argtypes = [wintypes.HDC, ctypes.c_int]
+    gdi.SetBrushOrgEx.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int,
+                                  ctypes.c_void_p]
 
     pdev = None
     if devmode_bytes and len(devmode_bytes) >= ctypes.sizeof(DEVMODEW):
@@ -257,6 +265,17 @@ def gdi_print(name: str, devmode_bytes: bytes | None, page_indices: list[int],
                 break
             if progress:
                 progress(k, total, f"Đang in trang {i + 1} ({k + 1}/{total})...")
+            # In VECTOR truc tiep len DC (net nhat) neu co draw_page
+            if draw_page is not None:
+                if gdi.StartPage(hdc) <= 0:
+                    continue
+                try:
+                    draw_page(hdc, i, hres, vres, dev_dpi_x, dev_dpi_y)
+                except Exception:
+                    pass
+                gdi.EndPage(hdc)
+                done += 1
+                continue
             res = get_bgr(i, hres, vres)
             if res is None:
                 continue
@@ -284,6 +303,10 @@ def gdi_print(name: str, devmode_bytes: bytes | None, page_indices: list[int],
             bmi.biPlanes = 1
             bmi.biBitCount = 24
             bmi.biCompression = BI_RGB
+            # Thu nho -> HALFTONE (muot); giu nguyen/phong -> COLORONCOLOR (net)
+            down = (dw < w) or (dh < h)
+            gdi.SetStretchBltMode(hdc, HALFTONE if down else COLORONCOLOR)
+            gdi.SetBrushOrgEx(hdc, 0, 0, None)
             gdi.StretchDIBits(hdc, dx, dy, dw, dh, 0, 0, w, h,
                               data, ctypes.byref(bmi), DIB_RGB_COLORS, SRCCOPY)
             gdi.EndPage(hdc)

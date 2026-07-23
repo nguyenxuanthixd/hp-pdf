@@ -1,5 +1,8 @@
 # Lịch sử cập nhật HP Cons PDF
 
+## v1.0.10
+- Cải thiện tình trạng in PDF bị mờ — in nét, sắc cạnh hơn.
+
 ## v1.0.9
 - Thanh tab: mở nhiều file không còn mất file đầu — có nút "Danh sách" liệt kê tất cả file đang mở để nhảy nhanh.
 - Kéo tab qua lại giữa các cửa sổ (tách ra hoặc gộp về cửa sổ khác).

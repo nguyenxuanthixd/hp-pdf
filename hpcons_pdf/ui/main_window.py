@@ -955,11 +955,22 @@ class MainWindow(QMainWindow):
         cancel = threading.Event()
 
         def get_bgr(i, max_w, max_h):
-            # Chon DPI vua du (gioi han bo nho), scale theo kho giay in
-            base = min(max_w, max_h)
-            dpi = 200 if base > 3000 else 300
-            scale = dpi / 72.0
-            pil = model.render_page(i, scale)
+            # Render KHOP do phan giai vung in cua may in (max_w x max_h px)
+            # de in NET 1:1, khong bi phong to gay mo. Gioi han canh dai <= CAP
+            # px de khong ton qua nhieu bo nho voi ban ve kho lon.
+            pw_pt, ph_pt = model.page_size(i)
+            long_pt = max(pw_pt, ph_pt, 1)
+            short_pt = max(min(pw_pt, ph_pt), 1)
+            long_px = max(max_w, max_h)
+            short_px = min(max_w, max_h)
+            scale = min(long_px / long_pt, short_px / short_pt)
+            # CAP du lon de anh KHOP vung in (1:1, khong bi phong -> khong mo);
+            # chi gioi han voi trang cuc lon de khong tran bo nho.
+            CAP = 10000
+            scale = min(scale, CAP / long_pt)
+            scale = max(scale, 1.0)
+            dpi = scale * 72.0
+            pil = model.render_page(i, scale, for_print=True)
             img = pil_to_qimage(pil)
             ref = model.pages[i]
             if ref.annots:
@@ -983,11 +994,45 @@ class MainWindow(QMainWindow):
             if progress.wasCanceled():
                 cancel.set()
 
+        # IN VECTOR truc tiep (net nhat, nhu Excel) khi trang KHONG co ghi chu
+        # minh them. Co ghi chu -> in anh (get_bgr) de giu ghi chu.
+        import pypdfium2.raw as pdfium_c
+
+        from ..core.document import PDFIUM_LOCK
+        has_annots = any(model.pages[i].annots for i in pages)
+        draw_page = None
+        if not has_annots:
+            def draw_page(hdc, i, hres, vres, dpi_x, dpi_y):
+                ref = model.pages[i]
+                disp_w, disp_h = model.page_size(i)   # da tinh ref.rotation
+                auto = 90 if ((disp_w > disp_h) != (hres > vres)) else 0
+                final_w, final_h = (disp_h, disp_w) if auto else (disp_w, disp_h)
+                fw = final_w * dpi_x / 72.0
+                fh = final_h * dpi_y / 72.0
+                if scale_mode == "actual":
+                    r = 1.0
+                elif scale_mode == "custom":
+                    r = custom_percent / 100.0
+                else:
+                    r = min(hres / max(fw, 1), vres / max(fh, 1))
+                dw, dh = int(fw * r), int(fh * r)
+                dx, dy = (hres - dw) // 2, (vres - dh) // 2
+                rot = ((ref.rotation + auto) // 90) % 4
+                flags = pdfium_c.FPDF_PRINTING | pdfium_c.FPDF_ANNOT
+                with PDFIUM_LOCK:
+                    page = ref.source.doc[ref.index]
+                    try:
+                        pdfium_c.FPDF_RenderPage(hdc, page.raw, dx, dy, dw, dh,
+                                                 rot, flags)
+                    finally:
+                        page.close()
+
         result = winprint.gdi_print(name, devmode, pages, get_bgr,
                                     doc_name=model.display_name,
                                     progress=prog, cancel=cancel,
                                     scale_mode=scale_mode,
-                                    custom_percent=custom_percent)
+                                    custom_percent=custom_percent,
+                                    draw_page=draw_page)
         progress.setValue(len(pages))
         if result is winprint.UNAVAILABLE:
             self._print_with_dialog()

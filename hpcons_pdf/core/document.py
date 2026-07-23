@@ -267,13 +267,28 @@ class DocumentModel:
         return w, h
 
     # ---------- Render ----------
-    def render_page(self, i: int, scale: float) -> Image.Image:
-        """Render trang thanh anh PIL RGB. Goi duoc tu moi thread (co lock)."""
+    def render_page(self, i: int, scale: float,
+                    for_print: bool = False) -> Image.Image:
+        """Render trang thanh anh PIL RGB. Goi duoc tu moi thread (co lock).
+
+        for_print=True: render TOI UU CHO IN (chu/net den sac canh, khong bi
+        khu rang cua thanh vien xam -> in ra net nhu Excel)."""
         ref = self.pages[i]
         with PDFIUM_LOCK:
             page = ref.source.doc[ref.index]
             try:
-                bitmap = page.render(scale=scale, rotation=ref.rotation)
+                if for_print:
+                    # Uu tien IN: tat khu rang cua chu/net -> canh DEN SAC
+                    # (in ra net nhu vector, khong bi vien xam mo)
+                    try:
+                        bitmap = page.render(
+                            scale=scale, rotation=ref.rotation,
+                            optimize_mode="print",
+                            no_smoothtext=True, no_smoothpath=True)
+                    except (TypeError, ValueError):
+                        bitmap = page.render(scale=scale, rotation=ref.rotation)
+                else:
+                    bitmap = page.render(scale=scale, rotation=ref.rotation)
                 pil = bitmap.to_pil().convert("RGB")
                 bitmap.close()
             finally:
