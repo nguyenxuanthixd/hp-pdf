@@ -63,6 +63,7 @@ class MainWindow(QMainWindow):
         self.render_thread.start()
 
         self.annot_color = "#E53935"
+        self.annot_width = float(config.get("annot_width", 2.0))
         self._current_shape = "rect"
         self.sidebar_visible = True
         self.tabs = QTabWidget()
@@ -375,6 +376,17 @@ class MainWindow(QMainWindow):
         self.btn_color.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         self.btn_color.clicked.connect(self._pick_color)
         tb.addWidget(self.btn_color)
+
+        # Chon do day net ve (duong / mui ten / khung / but)
+        self.cb_width = QComboBox()
+        for lbl, wv in (("Nét mảnh", 1.0), ("Nét vừa", 2.0),
+                        ("Nét đậm", 4.0), ("Nét rất đậm", 6.0)):
+            self.cb_width.addItem(lbl, wv)
+        idx = self.cb_width.findData(self.annot_width)
+        self.cb_width.setCurrentIndex(idx if idx >= 0 else 1)
+        self.cb_width.setToolTip("Độ dày nét vẽ (đường / mũi tên / khung / bút)")
+        self.cb_width.currentIndexChanged.connect(self._on_width_changed)
+        tb.addWidget(self.cb_width)
         tb.addSeparator()
 
         # Ghep / Tach file: dua ve cuoi theo yeu cau
@@ -535,6 +547,14 @@ class MainWindow(QMainWindow):
         if tab:
             tab.view.annot_color = self.annot_color
             tab.view.apply_color_to_selection(self.annot_color)
+
+    def _on_width_changed(self, _idx):
+        self.annot_width = float(self.cb_width.currentData() or 2.0)
+        config.set("annot_width", self.annot_width)
+        tab = self.current_tab()
+        if tab:
+            tab.view.annot_width = self.annot_width
+            tab.view.apply_width_to_selection(self.annot_width)
 
     def _toggle_sidebar(self, checked: bool):
         self.sidebar_visible = checked
@@ -807,6 +827,7 @@ class MainWindow(QMainWindow):
             checked = self.tool_group.checkedAction()
             tab.view.set_tool(checked.data() if checked else "pan")
             tab.view.annot_color = self.annot_color
+            tab.view.annot_width = self.annot_width
             tab.thumbs.setVisible(self.sidebar_visible)
         # Lazy render: chi tab DANG XEM render thumbnail; tab an huy yeu cau
         # dang cho de khong tranh khoa pdfium lam trang dang xem giat.

@@ -267,6 +267,56 @@ def _neutralize_show(inst):
     return []
 
 
+def _nearest_clip_ops(instructions, target_idx: int) -> list[int]:
+    """Chi so cac lenh W/W* (clip) DANG HIEU LUC bao quanh lenh `target_idx`.
+
+    Nhieu file (xuat tu Excel) ve chu/hinh trong tung O bang va CLIP theo
+    khung o (q ... khung ... W* n ... noi_dung ... Q). Khi DI CHUYEN noi dung
+    ra khoi o, phan nam ngoai khung clip se bi CAT -> chu "mat dan". De doi
+    tuong hien du sau khi keo, ta bo clip cua O chua no (bien W/W* -> path
+    binh thuong roi `n` loai bo, khong con gioi han ve).
+
+    Tra ve clip cua scope q...Q GAN NHAT co clip (bo qua clip o muc nen
+    trang — scope goc — de khong lo noi dung ngoai trang).
+    """
+    def _clip_only(wi: int) -> bool:
+        # Clip THUAN neu lenh to/ve ket thuc path sau W/W* la `n` (khong to,
+        # khong ve). Neu la f/S/B... thi bo `W` se lam HIEN o to -> khong dung.
+        for j in range(wi + 1, len(instructions)):
+            nx = instructions[j]
+            if isinstance(nx, pikepdf.ContentStreamInlineImage):
+                continue
+            nop = str(nx.operator)
+            if nop == "n":
+                return True
+            if nop in PAINT_OPS:
+                return False
+            if nop in ("W", "W*"):
+                continue
+            # gap lenh khac (BT, cm, ...) truoc khi ket thuc path -> khong ro
+            return False
+        return False
+
+    scopes: list[list[int]] = []
+    for idx in range(min(target_idx, len(instructions))):
+        ins = instructions[idx]
+        if isinstance(ins, pikepdf.ContentStreamInlineImage):
+            continue
+        op = str(ins.operator)
+        if op == "q":
+            scopes.append([])
+        elif op == "Q":
+            if scopes:
+                scopes.pop()
+        elif op in ("W", "W*"):
+            if scopes and _clip_only(idx):   # bo qua clip nen + clip kem to/ve
+                scopes[-1].append(idx)
+    for sc in reversed(scopes):
+        if sc:
+            return list(sc)
+    return []
+
+
 def apply_edits(instructions, slots: list[Slot], deletes: list[int],
                 moves: dict[int, tuple[float, float]]):
     """Tao danh sach lenh moi: xoa cac slot `deletes`, dich cac slot `moves`.
@@ -305,6 +355,12 @@ def apply_edits(instructions, slots: list[Slot], deletes: list[int],
         if si in delete_set:
             continue
         s = slots[si]
+        # Bo clip cua O bang chua doi tuong -> keo ra ngoai o van hien du chu
+        # (khong bi khung o cat mat). Xem _nearest_clip_ops.
+        anchor = (s.block[0] if (s.kind == "text" and s.block
+                                 and s.block[0] >= 0) else s.span[0])
+        for ci in _nearest_clip_ops(instructions, anchor):
+            remove.add(ci)
         if s.kind == "text":
             bt, et, n_shows = s.block if s.block else (-1, -1, 99)
             if n_shows == 1 and bt >= 0:

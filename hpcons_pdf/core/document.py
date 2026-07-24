@@ -542,6 +542,36 @@ class DocumentModel:
                                     background=is_bg))
         return result
 
+    def text_cluster(self, i: int, seeds: list[NativeObj]) -> list[NativeObj]:
+        """Gom cac MANH CHU chong/sat nhau cung 1 dong voi `seeds` (file xuat
+        loi hay tach 1 dong thanh nhieu manh de len nhau). Keo cum nay se dich
+        ca dong, khong bi xe. Chi gom CHU sat theo chieu doc (cung dong)."""
+        objs = [o for o in self.native_objects(i)
+                if o.type == pdfium_c.FPDF_PAGEOBJ_TEXT]
+        by_idx = {o.obj_index: o for o in objs}
+        chosen = {o.obj_index for o in seeds if o.obj_index in by_idx}
+        if not chosen:
+            return list(seeds)
+
+        def connected(a, b) -> bool:
+            # Chong/sat theo phuong NGANG va cung dong (y giao nhau nhieu)
+            gx = 2.0
+            x_ok = not (a.x > b.x + b.w + gx or b.x > a.x + a.w + gx)
+            iy = min(a.y + a.h, b.y + b.h) - max(a.y, b.y)
+            y_ok = iy >= 0.5 * min(a.h, b.h)   # cung dong
+            return x_ok and y_ok
+
+        changed = True
+        while changed:
+            changed = False
+            for o in objs:
+                if o.obj_index in chosen:
+                    continue
+                if any(connected(o, by_idx[c]) for c in list(chosen)):
+                    chosen.add(o.obj_index)
+                    changed = True
+        return [o for o in objs if o.obj_index in chosen]
+
     def _path_bboxes_fallback(self, ref: PageRef) -> dict:
         """Khung bao (l,b,r,t) khong gian trang cho cac doi tuong VE, tinh tu
         content stream. Dung khi pdfium get_bounds bao loi voi net ve (mot so

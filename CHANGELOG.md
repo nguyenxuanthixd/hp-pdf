@@ -1,5 +1,10 @@
 # Lịch sử cập nhật HP Cons PDF
 
+## v1.0.11
+- Sửa lỗi kéo/di chuyển chữ bị mất hoặc khuất chữ trên bản vẽ/báo giá (đặc biệt chữ tiếng Trung trong bảng).
+- Thêm tùy chọn độ mảnh nét vẽ (mảnh / vừa / đậm / rất đậm) cho công cụ vẽ hình.
+- Chỉnh sửa đường/mũi tên sau khi vẽ: kéo 2 đầu mút để kéo dài hoặc rút ngắn.
+
 ## v1.0.10
 - Cải thiện tình trạng in PDF bị mờ — in nét, sắc cạnh hơn.
 

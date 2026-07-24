@@ -8,6 +8,8 @@ from PyQt6.QtGui import (QColor, QCursor, QFont, QGuiApplication, QImage,
 from PyQt6.QtWidgets import (QInputDialog, QMenu, QMessageBox, QScrollArea,
                              QToolTip, QVBoxLayout, QWidget)
 
+import pypdfium2.raw as pdfium_c
+
 from ..core.annotations import Annot, measure_text
 from ..core.document import NativeObj
 from ..utils.errors import FriendlyError
@@ -215,6 +217,12 @@ def _draw_annot(p: QPainter, a: Annot, z: float, selected: bool):
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRect(QRectF(x * z - 3, y * z - 3, w * z + 6, h * z + 6))
+        # Diem nam 2 dau duong/mui ten -> keo dai/ngan
+        if a.kind in ("line", "arrow") and len(a.points) >= 2:
+            p.setPen(QPen(QColor("#1B75BB"), 1))
+            p.setBrush(QColor("#FFFFFF"))
+            for (px, py) in (a.points[0], a.points[-1]):
+                p.drawRect(QRectF(px * z - 4, py * z - 4, 8, 8))
 
 
 class PdfView(QScrollArea):
@@ -255,6 +263,9 @@ class PdfView(QScrollArea):
         # Trang thai cong cu
         self.tool = "pan"
         self.annot_color = "#E53935"
+        self.annot_width = 2.0
+        self._endpoint_drag = None      # (annot, chi_so_diem) khi keo dau duong
+        self._endpoint_before = None    # points truoc khi keo (de hoan tac)
         self._selected: tuple[int, Annot] | None = None   # ghi chu dang chon
         self._draft: Annot | None = None
         self._draft_page = -1
@@ -601,6 +612,22 @@ class PdfView(QScrollArea):
                 return a
         return None
 
+    def _endpoint_at(self, index: int, pt: QPointF):
+        """Neu dang chon 1 duong/mui ten tren trang `index` va con tro gan
+        1 trong 2 dau -> tra (annot, chi_so_diem); nguoc lai None."""
+        sel = self._selected
+        if sel is None or sel[0] != index:
+            return None
+        a = sel[1]
+        if a.kind not in ("line", "arrow") or len(a.points) < 2:
+            return None
+        tol = 7.0
+        for i in (0, len(a.points) - 1):
+            px, py = a.points[i]
+            if abs(pt.x() - px) <= tol and abs(pt.y() - py) <= tol:
+                return (a, i)
+        return None
+
     def _hit_native_safe(self, index: int, pt: QPointF) -> NativeObj | None:
         try:
             return self.model.hit_native(index, pt.x(), pt.y())
@@ -695,7 +722,13 @@ class PdfView(QScrollArea):
 
     # ----- Hover: doi con tro theo noi dung duoi chuot -----
     def handle_hover(self, pw: _PageWidget, pt: QPointF):
-        if self.tool != "pan" or self.model is None:
+        if self.model is None:
+            return
+        # Re vao dau duong/mui ten dang chon -> con tro keo dai/ngan
+        if self._endpoint_at(pw.index, pt) is not None:
+            pw.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            return
+        if self.tool != "pan":
             return
         # Re vao ghi chu minh them -> con tro di chuyen (keo duoc ngay)
         if self._hit_annot(pw.index, pt) is not None:
@@ -746,6 +779,15 @@ class PdfView(QScrollArea):
             return False
         if event.button() != Qt.MouseButton.LeftButton:
             return False
+
+        # Keo diem 2 dau duong/mui ten dang chon -> keo dai/ngan (moi cong cu)
+        ep = self._endpoint_at(pw.index, pt)
+        if ep is not None:
+            self._endpoint_drag = ep      # (annot, chi_so_diem)
+            self._drag_start = pt
+            a = ep[0]
+            self._endpoint_before = list(a.points)
+            return True
 
         if self.tool == "pan":
             # Bam trung GHI CHU minh them (chu/hinh/che trang) -> chon + keo
@@ -851,18 +893,26 @@ class PdfView(QScrollArea):
             if self.tool in ("line", "arrow", "pen"):
                 self._draft = Annot(kind=self.tool,
                                     points=[(pt.x(), pt.y())],
-                                    color=self.annot_color)
+                                    color=self.annot_color,
+                                    width=self.annot_width)
             elif self.tool == "cover":
                 self._draft = Annot(kind="whiteout", x=pt.x(), y=pt.y(),
                                     w=0, h=0, color="#FFFFFF")
             else:
                 self._draft = Annot(kind=self.tool, x=pt.x(), y=pt.y(),
-                                    w=0, h=0, color=self.annot_color)
+                                    w=0, h=0, color=self.annot_color,
+                                    width=self.annot_width)
             pw.update()
             return True
         return False
 
     def handle_move(self, pw: _PageWidget, pt: QPointF) -> bool:
+        if self._endpoint_drag is not None:
+            a, i = self._endpoint_drag
+            a.points[i] = (pt.x(), pt.y())
+            if self._selected is not None and self._selected[0] < len(self._pages):
+                self._pages[self._selected[0]].update()
+            return True
         if self._panning:
             delta = QCursor.pos() - self._pan_start
             self.horizontalScrollBar().setValue(self._pan_sb[0] - delta.x())
@@ -922,6 +972,17 @@ class PdfView(QScrollArea):
         return False
 
     def handle_release(self, pw: _PageWidget, pt: QPointF) -> bool:
+        if self._endpoint_drag is not None:
+            a, _i = self._endpoint_drag
+            before = self._endpoint_before
+            self._endpoint_drag = None
+            self._endpoint_before = None
+            if before is not None and before != a.points:
+                def _undo():
+                    a.points = list(before)
+                self.model.push_undo("chỉnh đường vẽ", _undo)
+                self._mark_changed()
+            return True
         if self._panning:
             self._panning = False
             pw.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -949,7 +1010,14 @@ class PdfView(QScrollArea):
                 # Bam (khong keo) -> chon 1 doi tuong tai diem bam
                 obj = getattr(self, "_pending_click_obj", None)
                 if obj is not None:
-                    self._set_native_sel((page, [obj]))
+                    sel = [obj]
+                    # Chu vo manh (file xuat loi) -> gom ca dong de keo khong xe
+                    if obj.type == pdfium_c.FPDF_PAGEOBJ_TEXT:
+                        try:
+                            sel = self.model.text_cluster(page, [obj]) or [obj]
+                        except Exception:
+                            sel = [obj]
+                    self._set_native_sel((page, sel))
             self._pending_click_obj = None
             if page < len(self._pages):
                 self._pages[page].update()
@@ -1182,6 +1250,21 @@ class PdfView(QScrollArea):
             self.model.push_undo("đổi màu", _undo)
             self._pages[idx].update()
             self._mark_changed()
+
+    def apply_width_to_selection(self, width: float):
+        """Doi do day net cua hinh dang chon (duong/mui ten/khung/but)."""
+        if self._selected is not None:
+            idx, a = self._selected
+            if a.kind in ("line", "arrow", "pen", "rect", "ellipse",
+                          "hl-ellipse"):
+                old = a.width
+                a.width = width
+
+                def _undo():
+                    a.width = old
+                self.model.push_undo("đổi độ dày nét", _undo)
+                self._pages[idx].update()
+                self._mark_changed()
 
     # ---------- Su kien ----------
     def keyPressEvent(self, event):
