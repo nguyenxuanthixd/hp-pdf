@@ -1,5 +1,9 @@
 # Lịch sử cập nhật HP Cons PDF
 
+## v1.0.12
+- In: ghi nhớ máy in và thiết lập in (số bản, màu, khổ giấy, 2 mặt, hướng, tỉ lệ) theo từng file đang mở, nhớ cả thuộc tính máy in (thiết lập driver) để in lại nhanh.
+- Đóng file thì thiết lập in trở về mặc định (không lưu cố định như trước).
+
 ## v1.0.11
 - Sửa lỗi kéo/di chuyển chữ bị mất hoặc khuất chữ trên bản vẽ/báo giá (đặc biệt chữ tiếng Trung trong bảng).
 - Thêm tùy chọn độ mảnh nét vẽ (mảnh / vừa / đậm / rất đậm) cho công cụ vẽ hình.

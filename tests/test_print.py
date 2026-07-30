@@ -102,15 +102,38 @@ def run():
         win.open_path(DDK)
         tab = win.current_tab()
         app.processEvents()
-        assert tab.print_devmode is None and tab.print_printer == ""
+        assert tab.print_devmode is None and tab.print_printer == "" \
+            and tab.print_prefs == {}
         tab.print_printer = "Canon"
         tab.print_devmode = b"xxxx"
+        tab.print_prefs = {"copies": 3, "color": "mono"}
         # dong tab -> tao tab moi (mo lai) -> thiet lap ve mac dinh
         idx = win.tabs.indexOf(tab)
         win._close_tab(idx)
         win.open_path(DDK)
         tab2 = win.current_tab()
-        assert tab2.print_devmode is None and tab2.print_printer == ""
+        assert tab2.print_devmode is None and tab2.print_printer == "" \
+            and tab2.print_prefs == {}
+
+        # ---- 5. In lan sau tren cung file: nap lai prefs + DEVMODE da nho ----
+        prefs2 = {"copies": 3, "color": False, "paper": "A4",
+                  "duplex": winprint.DMDUP_VERTICAL, "orientation": "portrait",
+                  "scale_mode": "custom", "custom_percent": 80.0}
+        dmw = winprint.DEVMODEW(); dmw.dmCopies = 7
+        saved_dm = bytes(dmw)
+        d2 = PrintDialog(10, 0, pn, pn[-1], pn[0], int(win.winId()),
+                         lambda i, mx: QPixmap(), win,
+                         prefs=prefs2, init_devmode=saved_dm)
+        assert d2.selected_printer() == pn[0]      # nho may in lan truoc
+        assert d2.copies() == 3 and d2.color_mode() is False
+        assert d2.paper() == "A4" and d2.duplex() == winprint.DMDUP_VERTICAL
+        assert d2.orientation() == "portrait"
+        assert d2.scale_mode() == "custom" and d2.custom_percent() == 80.0
+        # DEVMODE nap lai dung khi van dung may in do
+        assert d2.devmode_bytes() == saved_dm
+        if len(pn) > 1:                            # doi may in -> bo devmode cu
+            d2.cb_printer.setCurrentText(pn[1])
+            assert d2.devmode_bytes() != saved_dm
 
         print("PRINT SMOKE: OK")
     except Exception as e:

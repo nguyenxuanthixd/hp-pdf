@@ -62,7 +62,8 @@ class DocumentTab(QSplitter):
 
         # Ghi nho thiet lap in trong PHIEN nay (mat khi dong file -> ve mac dinh)
         self.print_printer = ""
-        self.print_devmode = None
+        self.print_devmode = None    # DEVMODE (thuoc tinh driver) lan in truoc
+        self.print_prefs = {}        # so ban/mau/kho/mat/huong/ti le lan truoc
 
     # ---------- Thao tac trang ----------
     def _reorder(self, order: list[int]):

@@ -17,9 +17,11 @@ class PrintDialog(QDialog):
     def __init__(self, page_count: int, current_page: int,
                  printer_names: list[str], default_name: str,
                  last_name: str, hwnd: int, get_preview, parent=None,
-                 prefs: dict | None = None):
+                 prefs: dict | None = None, init_devmode=None):
         """get_preview(page_index, max_px) -> QPixmap (de xem truoc).
-        prefs: thiet lap in lan truoc de nap lai (nho tuy chinh)."""
+        prefs: thiet lap in lan truoc de nap lai (nho tuy chinh).
+        init_devmode: DEVMODE (thuoc tinh driver) lan in truoc de nap lai —
+        chi dung khi may in dang chon dung la may in lan truoc (last_name)."""
         super().__init__(parent)
         self.setWindowTitle("In tài liệu")
         self.setMinimumSize(820, 560)
@@ -197,6 +199,11 @@ class PrintDialog(QDialog):
             rb.toggled.connect(self._sync_preview_to_range)
 
         self._load_devmode(self.cb_printer.currentText())
+        # Nap lai DEVMODE lan truoc (giu nguyen thiet lap sau cua driver:
+        # dong ghim, booklet...) neu van dung dung may in do
+        if init_devmode and last_name and \
+                self.cb_printer.currentText() == last_name:
+            self._devmode = init_devmode
         self._apply_prefs(prefs or {})
         self._refresh_preview()
 

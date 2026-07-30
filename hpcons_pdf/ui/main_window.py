@@ -880,21 +880,23 @@ class MainWindow(QMainWindow):
         default_info = QPrinterInfo.defaultPrinter()
         default_name = default_info.printerName() if default_info and \
             not default_info.isNull() else names[0]
-        last = tab.print_printer or config.get("last_printer", "")
+        last = tab.print_printer
 
         def get_preview(page_index, max_px):
             return self._render_preview_pixmap(tab, page_index, max_px)
 
-        prefs = config.get("print_prefs", {}) or {}
+        # Ghi nho theo TUNG FILE trong phien (khong luu lau dai): may in,
+        # tuy chinh va DEVMODE (thuoc tinh driver) cua lan in truoc tren tab.
+        prefs = tab.print_prefs or {}
+        init_dm = tab.print_devmode if last else None
         dlg = PrintDialog(tab.model.page_count, tab.view.current_page,
                           names, default_name, last, int(self.winId()),
-                          get_preview, self, prefs=prefs)
+                          get_preview, self, prefs=prefs, init_devmode=init_dm)
         if not dlg.exec():
             return
         name = dlg.selected_printer()
-        config.set("last_printer", name)
-        # Nho tuy chinh in cho lan sau
-        config.set("print_prefs", {
+        # Nho tuy chinh in cho lan sau (chi trong phien, theo tab)
+        tab.print_prefs = {
             "copies": dlg.copies(),
             "color": dlg.color_mode(),
             "paper": dlg.paper(),
@@ -902,7 +904,7 @@ class MainWindow(QMainWindow):
             "orientation": dlg.orientation(),
             "scale_mode": dlg.scale_mode(),
             "custom_percent": dlg.custom_percent(),
-        })
+        }
         pages = dlg.page_indices()
 
         # Ap thiet lap tu hop thoai vao DEVMODE (huong giay, den trang).

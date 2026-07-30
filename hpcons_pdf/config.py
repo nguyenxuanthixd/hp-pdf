@@ -18,7 +18,6 @@ _DEFAULTS = {
     },
     "watermark_text": "TÀI LIỆU ĐẤU THẦU – HP CONS",
     "recent_files": [],
-    "last_printer": "",           # may in chon lan cuoi (nho cho lan in sau)
     "auto_check_update": True,    # tu kiem tra cap nhat khi khoi dong
     "skip_update_version": "",    # phien ban nguoi dung chon "bo qua"
 }
