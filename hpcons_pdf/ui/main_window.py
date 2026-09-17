@@ -49,6 +49,10 @@ class MainWindow(QMainWindow):
     _instances: list["MainWindow"] = []
     # Clipboard trang DUNG CHUNG moi cua so (copy trang giua cac cua so)
     _page_clipboard: list[dict] = []
+    # Ghi nho thiet lap in DUNG CHUNG ca PHIEN (moi file dang mo dung chung).
+    # Chi ve mac dinh khi DONG HET file (khong con tab nao o moi cua so).
+    # {"printer": str, "devmode": bytes|None, "prefs": dict}
+    _print_mem: dict = {}
 
     def __init__(self):
         super().__init__()
@@ -787,6 +791,16 @@ class MainWindow(QMainWindow):
                                 0, lambda i=idx, g=gp: self.detach_tab(i, g))
         return super().eventFilter(obj, event)
 
+    @staticmethod
+    def _reset_print_mem_if_no_docs():
+        """Ve mac dinh khi DONG HET file (khong con tab tai lieu o cua so nao).
+        Giu nguyen ghi nho in khi van con it nhat 1 file dang mo."""
+        for win in MainWindow._instances:
+            for i in range(win.tabs.count()):
+                if isinstance(win.tabs.widget(i), DocumentTab):
+                    return
+        MainWindow._print_mem = {}
+
     def _close_tab(self, index: int):
         w = self.tabs.widget(index)
         if not isinstance(w, DocumentTab):
@@ -814,6 +828,7 @@ class MainWindow(QMainWindow):
         self.tabs.removeTab(index)
         w.close_document()
         w.deleteLater()
+        MainWindow._reset_print_mem_if_no_docs()
         if self.tabs.count() == 0:
             if self is not MainWindow._instances[0]:
                 self.close()  # cua so phu het tab -> tu dong
@@ -880,23 +895,24 @@ class MainWindow(QMainWindow):
         default_info = QPrinterInfo.defaultPrinter()
         default_name = default_info.printerName() if default_info and \
             not default_info.isNull() else names[0]
-        last = tab.print_printer
+        mem = MainWindow._print_mem
+        last = mem.get("printer", "")
 
         def get_preview(page_index, max_px):
             return self._render_preview_pixmap(tab, page_index, max_px)
 
-        # Ghi nho theo TUNG FILE trong phien (khong luu lau dai): may in,
-        # tuy chinh va DEVMODE (thuoc tinh driver) cua lan in truoc tren tab.
-        prefs = tab.print_prefs or {}
-        init_dm = tab.print_devmode if last else None
+        # Ghi nho DUNG CHUNG ca phien (khong luu lau dai): may in, tuy chinh va
+        # DEVMODE (thuoc tinh driver) cua lan in truoc. Reset khi dong het file.
+        prefs = mem.get("prefs", {}) or {}
+        init_dm = mem.get("devmode") if last else None
         dlg = PrintDialog(tab.model.page_count, tab.view.current_page,
                           names, default_name, last, int(self.winId()),
                           get_preview, self, prefs=prefs, init_devmode=init_dm)
         if not dlg.exec():
             return
         name = dlg.selected_printer()
-        # Nho tuy chinh in cho lan sau (chi trong phien, theo tab)
-        tab.print_prefs = {
+        # Nho tuy chinh in cho lan sau (dung chung ca phien)
+        new_prefs = {
             "copies": dlg.copies(),
             "color": dlg.color_mode(),
             "paper": dlg.paper(),
@@ -921,8 +937,9 @@ class MainWindow(QMainWindow):
                 duplex=dlg.duplex())
         except Exception:
             pass
-        tab.print_printer = name
-        tab.print_devmode = dm  # nho cho lan in sau (trong phien)
+        # Nho DUNG CHUNG ca phien cho lan in sau (moi file dung chung)
+        MainWindow._print_mem = {
+            "printer": name, "devmode": dm, "prefs": new_prefs}
         copies = dlg.copies()
         if copies > 1:
             pages = pages * copies
@@ -1521,8 +1538,18 @@ class MainWindow(QMainWindow):
         if not tab or not pages:
             return
         model = tab.model
-        dest = suffixed_output(model.path, "_extracted",
-                               out_dir=default_out_dir(model.path))
+        suggested = suffixed_output(model.path, "_extracted",
+                                    out_dir=default_out_dir(model.path))
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "Trích xuất trang thành file mới", suggested,
+            "File PDF (*.pdf)")
+        if not dest:
+            return
+        if os.path.abspath(dest) == os.path.abspath(model.path):
+            show_error(self, "Không thể ghi đè file gốc.\n"
+                             "Vui lòng chọn tên file khác — ứng dụng luôn "
+                             "giữ nguyên file gốc để an toàn.")
+            return
 
         def job(progress, cancel):
             return model.save_as(dest, indices=pages, progress=progress,
@@ -1764,4 +1791,5 @@ class MainWindow(QMainWindow):
                 w.close_document()
         if self in MainWindow._instances:
             MainWindow._instances.remove(self)
+        MainWindow._reset_print_mem_if_no_docs()
         event.accept()

@@ -1,5 +1,9 @@
 # Lịch sử cập nhật HP Cons PDF
 
+## v1.0.13
+- In: nhớ máy in và thiết lập in dùng chung cho cả phiên — mở nhiều file dùng chung; chỉ khi đóng hết tất cả file mới về mặc định.
+- Trích xuất trang: cho chọn thư mục và tên file khi lưu (trước đây lưu cố định cạnh file gốc).
+
 ## v1.0.12
 - In: ghi nhớ máy in và thiết lập in (số bản, màu, khổ giấy, 2 mặt, hướng, tỉ lệ) theo từng file đang mở, nhớ cả thuộc tính máy in (thiết lập driver) để in lại nhanh.
 - Đóng file thì thiết lập in trở về mặc định (không lưu cố định như trước).

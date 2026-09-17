@@ -98,22 +98,29 @@ def run():
         assert chk.dmFields & winprint.DM_PAPERSIZE
         assert chk.dmFields & winprint.DM_DUPLEX
 
-        # ---- 4. Ghi nho thiet lap per-tab, reset khi dong file ----
-        win.open_path(DDK)
-        tab = win.current_tab()
+        # ---- 4. Ghi nho DUNG CHUNG ca phien, reset khi DONG HET file ----
+        import shutil, tempfile
+        MainWindow._print_mem = {}
+        win.open_path(DDK)                       # file 1
+        ddk2 = os.path.join(tempfile.mkdtemp(), "file2.pdf")
+        shutil.copyfile(DDK, ddk2)
+        win.open_path(ddk2)                      # file 2 (cung phien, 2 tab)
         app.processEvents()
-        assert tab.print_devmode is None and tab.print_printer == "" \
-            and tab.print_prefs == {}
-        tab.print_printer = "Canon"
-        tab.print_devmode = b"xxxx"
-        tab.print_prefs = {"copies": 3, "color": "mono"}
-        # dong tab -> tao tab moi (mo lai) -> thiet lap ve mac dinh
-        idx = win.tabs.indexOf(tab)
-        win._close_tab(idx)
+        assert win.tabs.count() == 2
+        # gia lap da in 1 lan -> ghi nho dung chung ca phien
+        MainWindow._print_mem = {"printer": "Canon", "devmode": b"xxxx",
+                                 "prefs": {"copies": 3}}
+        # dong 1 file -> VAN con file khac -> VAN nho
+        win._close_tab(0)
+        assert MainWindow._print_mem.get("printer") == "Canon", \
+            "con file dang mo thi khong duoc quen thiet lap in"
+        # dong NOT file cuoi -> moi reset ve mac dinh
+        win._close_tab(0)
+        assert MainWindow._print_mem == {}, \
+            "dong het file phai ve mac dinh"
+        # mo lai file bat ky -> van mac dinh (da quen)
         win.open_path(DDK)
-        tab2 = win.current_tab()
-        assert tab2.print_devmode is None and tab2.print_printer == "" \
-            and tab2.print_prefs == {}
+        assert MainWindow._print_mem == {}
 
         # ---- 5. In lan sau tren cung file: nap lai prefs + DEVMODE da nho ----
         prefs2 = {"copies": 3, "color": False, "paper": "A4",
