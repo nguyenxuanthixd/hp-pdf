@@ -50,6 +50,12 @@ class ThumbnailPanel(QListWidget):
         self._autoscroll.setInterval(30)
         self._autoscroll.timeout.connect(self._autoscroll_tick)
         self._autoscroll_dy = 0
+        # Lazy theo VUNG NHIN: chi render thumbnail dang thay (+ le nho), cuon
+        # toi dau render toi do -> nhe RAM/CPU voi file nhieu trang.
+        self._lazy_timer = QTimer(self)
+        self._lazy_timer.setSingleShot(True)
+        self._lazy_timer.setInterval(50)
+        self._lazy_timer.timeout.connect(self._request_visible)
         # Luoi: xep tu trai sang phai, tu xuong dong theo chieu rong panel
         self.setViewMode(QListView.ViewMode.IconMode)
         self.setFlow(QListView.Flow.LeftToRight)
@@ -75,6 +81,9 @@ class ThumbnailPanel(QListWidget):
         self.model().rowsMoved.connect(lambda *_: self._sync_after_move())
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_menu)
+        # Cuon cot thumbnail -> render nhung trang vua vao tam nhin (lazy)
+        self.verticalScrollBar().valueChanged.connect(
+            lambda _v: self._lazy_timer.start())
 
     # ---------- Nap du lieu ----------
     def set_model(self, model_doc):
@@ -89,7 +98,7 @@ class ThumbnailPanel(QListWidget):
         if self.model_doc is None:
             return
         if active:
-            self._request_missing()
+            self._lazy_timer.start()   # render vung dang nhin (lazy)
         else:
             self._rt.clear_pending("thumb", self.model_doc)
 
@@ -110,7 +119,7 @@ class ThumbnailPanel(QListWidget):
             it.setSizeHint(self._cell_size(i))
             self.addItem(it)
         if self._active:
-            self._request_all()
+            self._lazy_timer.start()   # render vung dang nhin (lazy)
 
     def _thumb_scale(self, w_pt, h_pt) -> float:
         """Ty le render thumbnail, NHAN dpr man hinh -> net tren man hinh co
@@ -118,16 +127,57 @@ class ThumbnailPanel(QListWidget):
         dpr = self.devicePixelRatioF() or 1.0
         return min(THUMB_W / max(w_pt, 1), THUMB_H / max(h_pt, 1)) * dpr
 
-    def _request_missing(self):
-        """Render nhung trang chua co thumbnail (khi kich hoat lai tab)."""
-        if self.model_doc is None:
-            return
-        for i in range(self.model_doc.page_count):
-            if i in self._rendered_idx:
+    def _visible_rows(self) -> tuple[int, int]:
+        """Khoang hang (first,last) dang hien trong cot thumbnail (toa do
+        viewport, da tru cuon); (-1,-1) neu chua co/khong thay."""
+        n = self.count()
+        if n == 0:
+            return (-1, -1)
+        vp_bot = self.viewport().height()
+        first, last = -1, -1
+        for row in range(n):
+            r = self.visualItemRect(self.item(row))
+            if r.isNull() or r.height() == 0:
                 continue
-            w_pt, h_pt = self.model_doc.page_size(i)
-            scale = self._thumb_scale(w_pt, h_pt)
-            self._rt.request(self.model_doc, i, scale, "thumb", self.generation)
+            if r.bottom() >= 0 and r.top() <= vp_bot:
+                if first < 0:
+                    first = row
+                last = row
+            elif first >= 0 and r.top() > vp_bot:
+                break  # o xep theo thu tu -> qua vung nhin thi dung
+        return (first, last)
+
+    def _request_visible(self):
+        """Render thumbnail cho trang DANG THAY (+ le nho); giai phong trang
+        qua xa tam nhin ve placeholder de cap RAM (file nhieu trang van nhe)."""
+        if self.model_doc is None or not self._active:
+            return
+        first, last = self._visible_rows()
+        if first < 0:
+            return
+        MARGIN, FREE = 6, 40
+        lo = max(0, first - MARGIN)
+        hi = min(self.count() - 1, last + MARGIN)
+        for row in range(lo, hi + 1):
+            idx = self.item(row).data(_ROLE_POS)
+            if idx in self._rendered_idx:
+                continue
+            w_pt, h_pt = self.model_doc.page_size(idx)
+            self._rt.request(self.model_doc, idx,
+                             self._thumb_scale(w_pt, h_pt),
+                             "thumb", self.generation)
+        for row in range(self.count()):
+            if lo - FREE <= row <= hi + FREE:
+                continue
+            it = self.item(row)
+            idx = it.data(_ROLE_POS)
+            if idx in self._rendered_idx:
+                it.setIcon(self._placeholder_icon(idx))
+                self._rendered_idx.discard(idx)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._lazy_timer.start()   # doi be rong/cao -> render lai vung nhin
 
     def _cell_size(self, i: int) -> QSize:
         """Kich thuoc o = anh thu nho theo ty le trang + cho nhan so."""
@@ -145,12 +195,6 @@ class ThumbnailPanel(QListWidget):
         w_pt, h_pt = self.model_doc.page_size(i)
         scale = self._thumb_scale(w_pt, h_pt)
         self._rt.request(self.model_doc, i, scale, "thumb", self.generation)
-
-    def _request_all(self):
-        for i in range(self.model_doc.page_count):
-            w_pt, h_pt = self.model_doc.page_size(i)
-            scale = self._thumb_scale(w_pt, h_pt)
-            self._rt.request(self.model_doc, i, scale, "thumb", self.generation)
 
     def _placeholder_icon(self, i: int) -> QIcon:
         w_pt, h_pt = self.model_doc.page_size(i)
@@ -392,7 +436,7 @@ class ThumbnailPanel(QListWidget):
         self._rt.clear_pending("thumb", self.model_doc)
         self._rendered_idx.clear()
         if self.model_doc is not None and self._active:
-            self._request_all()
+            self._lazy_timer.start()   # render vung dang nhin (lazy)
 
     def selected_pages(self) -> list[int]:
         return sorted(self.row(it) for it in self.selectedItems())

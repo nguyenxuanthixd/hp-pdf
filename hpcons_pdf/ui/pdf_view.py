@@ -32,7 +32,6 @@ class _PageWidget(QWidget):
         self.index = index
         self.view = view
         self.pixmap: QPixmap | None = None
-        self.pixmap_gen = -1   # the generation (zoom/layout) cua pixmap dang giu
         self.highlights: list[tuple[float, float, float, float]] = []
         self.text_sel_rects: list[tuple[float, float, float, float]] = []
         self.zoom = 1.0
@@ -45,9 +44,6 @@ class _PageWidget(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        # Lam min khi pixmap bi co giãn (vd dang zoom, pixmap cu chua render lai)
-        # -> chu khong bi rang cua, do giat khi phong to/thu nho muot hon
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         p.fillRect(self.rect(), QColor("#FFFFFF"))
         if self.pixmap is not None:
             p.drawPixmap(self.rect(), self.pixmap)
@@ -409,9 +405,7 @@ class PdfView(QScrollArea):
         for i, pw in enumerate(self._pages):
             w_pt, h_pt = self._sizes_pt[i]
             pw.zoom = self.zoom
-            # GIU pixmap cu (co giãn tam thoi, lam min) cho den khi render lai
-            # dung ti le -> khong chop trang "Dang tai...", zoom muot, do giat.
-            # (reload sau xoa/sap xep tao widget moi nen khong hien nham noi dung)
+            pw.pixmap = None
             pw.set_page_px(int(w_pt * BASE_SCALE * self.zoom),
                            int(h_pt * BASE_SCALE * self.zoom))
         self._container.adjustSize()
@@ -454,15 +448,12 @@ class PdfView(QScrollArea):
         dpr = self.devicePixelRatioF()
         for i in range(lo, hi + 1):
             pw = self._pages[i]
-            # Render lai khi chua co anh HOAC anh dang giu la cua zoom/layout cu
-            # (pixmap_gen != generation hien tai) -> anh luon dung ti le, net.
-            if pw.pixmap is None or pw.pixmap_gen != self.generation:
+            if pw.pixmap is None:
                 self._rt.request(self.model, i, BASE_SCALE * self.zoom * dpr,
                                  "page", self.generation)
         for i, pw in enumerate(self._pages):
             if (i < lo - 4 or i > hi + 4) and pw.pixmap is not None:
                 pw.pixmap = None
-                pw.pixmap_gen = -1
 
     def _on_rendered(self, purpose: str, index: int, gen: int, img: QImage,
                      model=None):
@@ -474,7 +465,6 @@ class PdfView(QScrollArea):
         pm = QPixmap.fromImage(img)
         pm.setDevicePixelRatio(self.devicePixelRatioF())
         self._pages[index].pixmap = pm
-        self._pages[index].pixmap_gen = gen
         self._pages[index].update()
 
     # ---------- Dieu huong ----------
@@ -577,7 +567,6 @@ class PdfView(QScrollArea):
     def _refresh_page_render(self, index: int):
         if index < len(self._pages):
             self._pages[index].pixmap = None
-            self._pages[index].pixmap_gen = -1
             self._pages[index].update()
             self._update_timer.start()
         self.pageContentChanged.emit(index)

@@ -1,5 +1,9 @@
 # Lịch sử cập nhật HP Cons PDF
 
+## v1.0.15
+- Trả lại cách phóng to/thu nhỏ quen thuộc (bỏ hiệu ứng gây mờ/khó chịu ở bản trước).
+- Mở file nhiều trang nhẹ và nhanh hơn: chỉ tải ảnh thu nhỏ của trang đang xem, cuộn tới đâu tải tới đó (bớt ngốn RAM).
+
 ## v1.0.14
 - Phóng to/thu nhỏ mượt hơn, bớt giựt (không còn chớp trắng), chữ bớt răng cưa.
 - Ảnh thu nhỏ (cột trái) nét hơn trên màn hình độ phân giải cao (125%/150%).
