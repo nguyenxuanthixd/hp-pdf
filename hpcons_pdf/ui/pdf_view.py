@@ -32,6 +32,7 @@ class _PageWidget(QWidget):
         self.index = index
         self.view = view
         self.pixmap: QPixmap | None = None
+        self.pixmap_gen = -1   # the generation (zoom/layout) cua pixmap dang giu
         self.highlights: list[tuple[float, float, float, float]] = []
         self.text_sel_rects: list[tuple[float, float, float, float]] = []
         self.zoom = 1.0
@@ -44,6 +45,9 @@ class _PageWidget(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Lam min khi pixmap bi co giãn (vd dang zoom, pixmap cu chua render lai)
+        # -> chu khong bi rang cua, do giat khi phong to/thu nho muot hon
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         p.fillRect(self.rect(), QColor("#FFFFFF"))
         if self.pixmap is not None:
             p.drawPixmap(self.rect(), self.pixmap)
@@ -405,7 +409,9 @@ class PdfView(QScrollArea):
         for i, pw in enumerate(self._pages):
             w_pt, h_pt = self._sizes_pt[i]
             pw.zoom = self.zoom
-            pw.pixmap = None
+            # GIU pixmap cu (co giãn tam thoi, lam min) cho den khi render lai
+            # dung ti le -> khong chop trang "Dang tai...", zoom muot, do giat.
+            # (reload sau xoa/sap xep tao widget moi nen khong hien nham noi dung)
             pw.set_page_px(int(w_pt * BASE_SCALE * self.zoom),
                            int(h_pt * BASE_SCALE * self.zoom))
         self._container.adjustSize()
@@ -448,12 +454,15 @@ class PdfView(QScrollArea):
         dpr = self.devicePixelRatioF()
         for i in range(lo, hi + 1):
             pw = self._pages[i]
-            if pw.pixmap is None:
+            # Render lai khi chua co anh HOAC anh dang giu la cua zoom/layout cu
+            # (pixmap_gen != generation hien tai) -> anh luon dung ti le, net.
+            if pw.pixmap is None or pw.pixmap_gen != self.generation:
                 self._rt.request(self.model, i, BASE_SCALE * self.zoom * dpr,
                                  "page", self.generation)
         for i, pw in enumerate(self._pages):
             if (i < lo - 4 or i > hi + 4) and pw.pixmap is not None:
                 pw.pixmap = None
+                pw.pixmap_gen = -1
 
     def _on_rendered(self, purpose: str, index: int, gen: int, img: QImage,
                      model=None):
@@ -465,6 +474,7 @@ class PdfView(QScrollArea):
         pm = QPixmap.fromImage(img)
         pm.setDevicePixelRatio(self.devicePixelRatioF())
         self._pages[index].pixmap = pm
+        self._pages[index].pixmap_gen = gen
         self._pages[index].update()
 
     # ---------- Dieu huong ----------
@@ -567,6 +577,7 @@ class PdfView(QScrollArea):
     def _refresh_page_render(self, index: int):
         if index < len(self._pages):
             self._pages[index].pixmap = None
+            self._pages[index].pixmap_gen = -1
             self._pages[index].update()
             self._update_timer.start()
         self.pageContentChanged.emit(index)
@@ -1203,9 +1214,50 @@ class PdfView(QScrollArea):
                 self.model.delete_natives(index, [obj])
                 self._native_sel = None
         except FriendlyError as e:
-            QMessageBox.warning(self, "Không sửa được", str(e))
+            # Font nhung cua file thieu ky tu -> de nghi THAY bang chu moi
+            # (che nen theo mau + dat chu moi dung cho, font day du).
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle("Không sửa trực tiếp được")
+            box.setText(str(e))
+            box.setInformativeText(
+                "Thay bằng chữ mới đè lên đúng chỗ (dùng font đầy đủ) không?")
+            btn_rep = box.addButton("Thay bằng chữ mới",
+                                    QMessageBox.ButtonRole.AcceptRole)
+            box.addButton("Hủy", QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            if box.clickedButton() is btn_rep and text.strip():
+                self._replace_native_with_annot(index, obj, text.strip())
             return
         self._refresh_page_render(index)
+        self._mark_changed()
+
+    def _replace_native_with_annot(self, index: int, obj: NativeObj,
+                                   new_text: str):
+        """Khi khong sua truc tiep duoc (font file thieu ky tu): che chu goc
+        theo MAU NEN roi dat chu moi (font day du) ngay dung cho. Gom 1 undo;
+        chon san chu moi de Sep chinh them (mau/co/vi tri) neu can."""
+        x, y, w, h = obj.x, obj.y, obj.w, obj.h
+        bg = self.model.sample_bg_color(index, x, y, w, h) or "#FFFFFF"
+        ref = self.model.pages[index]
+        cover = Annot(kind="whiteout", x=x - 1, y=y - 1, w=w + 2, h=h + 2,
+                      color=bg)
+        # Khung bao chu (h) ~ 0.8 co font -> co font ~ h / 0.8 de sat kich thuoc
+        fs = max(6.0, min(h * 1.25, 400.0))
+        txt = Annot(kind="text", x=x, y=y, text=new_text, color="#000000",
+                    font_size=fs, font="Arial", bg_color="")
+        txt.w, txt.h = measure_text(txt.text, txt.font_size, txt.font)
+        ref.annots.append(cover)
+        ref.annots.append(txt)
+
+        def _undo():
+            for a in (cover, txt):
+                if a in ref.annots:
+                    ref.annots.remove(a)
+        self.model.push_undo("thay chữ", _undo)
+        self._native_sel = None
+        self._selected = (index, txt)
+        self._pages[index].update()
         self._mark_changed()
 
     def _show_annot_menu(self, pw: _PageWidget, a: Annot, event):

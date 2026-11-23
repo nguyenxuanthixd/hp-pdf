@@ -112,6 +112,12 @@ class ThumbnailPanel(QListWidget):
         if self._active:
             self._request_all()
 
+    def _thumb_scale(self, w_pt, h_pt) -> float:
+        """Ty le render thumbnail, NHAN dpr man hinh -> net tren man hinh co
+        giãn (125%/150%); dpr=1 thi khong doi gi."""
+        dpr = self.devicePixelRatioF() or 1.0
+        return min(THUMB_W / max(w_pt, 1), THUMB_H / max(h_pt, 1)) * dpr
+
     def _request_missing(self):
         """Render nhung trang chua co thumbnail (khi kich hoat lai tab)."""
         if self.model_doc is None:
@@ -120,7 +126,7 @@ class ThumbnailPanel(QListWidget):
             if i in self._rendered_idx:
                 continue
             w_pt, h_pt = self.model_doc.page_size(i)
-            scale = min(THUMB_W / max(w_pt, 1), THUMB_H / max(h_pt, 1))
+            scale = self._thumb_scale(w_pt, h_pt)
             self._rt.request(self.model_doc, i, scale, "thumb", self.generation)
 
     def _cell_size(self, i: int) -> QSize:
@@ -137,13 +143,13 @@ class ThumbnailPanel(QListWidget):
         if not self._active:
             return  # tab an -> de dan khi kich hoat lai
         w_pt, h_pt = self.model_doc.page_size(i)
-        scale = min(THUMB_W / max(w_pt, 1), THUMB_H / max(h_pt, 1))
+        scale = self._thumb_scale(w_pt, h_pt)
         self._rt.request(self.model_doc, i, scale, "thumb", self.generation)
 
     def _request_all(self):
         for i in range(self.model_doc.page_count):
             w_pt, h_pt = self.model_doc.page_size(i)
-            scale = min(THUMB_W / max(w_pt, 1), THUMB_H / max(h_pt, 1))
+            scale = self._thumb_scale(w_pt, h_pt)
             self._rt.request(self.model_doc, i, scale, "thumb", self.generation)
 
     def _placeholder_icon(self, i: int) -> QIcon:
@@ -164,6 +170,7 @@ class ThumbnailPanel(QListWidget):
                 or model is not self.model_doc:
             return
         pm = QPixmap.fromImage(img)
+        pm.setDevicePixelRatio(self.devicePixelRatioF())  # hien dung co, net
         # item co the da doi vi tri -> tim theo _ROLE_POS
         for row in range(self.count()):
             it = self.item(row)

@@ -1,5 +1,10 @@
 # Lịch sử cập nhật HP Cons PDF
 
+## v1.0.14
+- Phóng to/thu nhỏ mượt hơn, bớt giựt (không còn chớp trắng), chữ bớt răng cưa.
+- Ảnh thu nhỏ (cột trái) nét hơn trên màn hình độ phân giải cao (125%/150%).
+- Sửa chữ có sẵn trong file khi font thiếu ký tự: app tự đề nghị thay bằng chữ mới — che chữ cũ theo màu nền và đặt chữ mới (gõ tiếng Việt thoải mái) ngay đúng chỗ, không phải xóa thủ công.
+
 ## v1.0.13
 - In: nhớ máy in và thiết lập in dùng chung cho cả phiên — mở nhiều file dùng chung; chỉ khi đóng hết tất cả file mới về mặc định.
 - Trích xuất trang: cho chọn thư mục và tên file khi lưu (trước đây lưu cố định cạnh file gốc).

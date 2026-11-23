@@ -103,8 +103,17 @@ check("Luu nhanh: overwrite dung file da xuat; mac dinh van chong trung", t_quic
 # ---------- 3. GUI: gop nhanh khi tha + keo sap xep + chen truoc trang ----------
 def t_gui():
     from PyQt6.QtCore import QTimer
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QDialog
     from hpcons_pdf.ui.main_window import MainWindow
+    from hpcons_pdf.ui.dialogs import merge_drop
+
+    # Tu dong "OK" hop thoai hoi vi tri ghep (chon dung vi tri tha) de khong treo
+    class _AutoMergeDialog(merge_drop.MergeDropDialog):
+        def exec(self):
+            if getattr(self, "rb_drop", None) is not None:
+                self.rb_drop.setChecked(True)
+            return QDialog.DialogCode.Accepted.value
+    merge_drop.MergeDropDialog = _AutoMergeDialog
 
     app = QApplication.instance() or QApplication(sys.argv)
     win = MainWindow()
